@@ -1,0 +1,26 @@
+# environment & large assets - rebuilt by setup.sh
+.venv/
+hrtf/
+static/three.min.js
+
+# runtime data - never commit
+stems/
+renders/
+uploads/
+config.json
+server.log
+*.log
+
+# audio, categorically
+*.flac
+*.wav
+*.aif
+*.aiff
+*.m4a
+*.mp3
+*.ogg
+*.opus
+
+.DS_Store
+__pycache__/
+*.pyc

@@ -1,0 +1,116 @@
+#!/usr/bin/env python
+"""Binaural 3D-ify any track, preserving fidelity.
+
+  usage:  spatialize_cli.py <audio-file> [--beta 0.85] [--orbit 50] [--xover 200]
+
+Moves only the DIRECTIONAL component of the non-percussive layer; the diffuse
+field, the bass and the drums are never HRTF-filtered and never reconstructed
+from stems, so the original master survives underneath.
+"""
+import sys, os, json, subprocess, argparse, hashlib
+import numpy as np, soundfile as sf, sofar
+from scipy.signal import resample_poly, butter, sosfiltfilt
+from math import gcd
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SOFA = {44100: 'D1_44K_16bit_256tap_FIR_SOFA.sofa',
+        48000: 'D1_48K_24bit_256tap_FIR_SOFA.sofa',
+        96000: 'D1_96K_24bit_512tap_FIR_SOFA.sofa'}
+
+p = argparse.ArgumentParser()
+p.add_argument('infile'); p.add_argument('--beta', type=float, default=0.85)
+p.add_argument('--orbit', type=float, default=50.0); p.add_argument('--xover', type=float, default=200.0)
+p.add_argument('--elev', type=float, default=25.0); p.add_argument('--ramp', type=float, default=20.0)
+p.add_argument('--stem', default='other', choices=['other','vocals','drums','bass'])
+p.add_argument('--out', default=None)
+p.add_argument('--preset', default=None, choices=['subtle','natural','wide'])
+p.add_argument('--model', default='htdemucs')
+p.add_argument('--shifts', type=int, default=0)
+a = p.parse_args()
+if a.preset:
+    a.beta, a.orbit = {'subtle': (0.60, 72.0), 'natural': (0.85, 50.0), 'wide': (1.0, 36.0)}[a.preset]
+
+info = sf.info(a.infile)
+SR = info.samplerate if info.samplerate in SOFA else 96000
+print(f"source : {info.samplerate} Hz {info.channels}ch {info.duration:.1f}s -> working at {SR} Hz")
+
+orig, sr0 = sf.read(a.infile, dtype='float64', always_2d=True)
+if orig.shape[1] == 1: orig = np.repeat(orig, 2, axis=1)
+if sr0 != SR:
+    g = gcd(SR, sr0); orig = resample_poly(orig, SR//g, sr0//g, axis=0)
+n = len(orig)
+
+st = os.stat(a.infile)
+key = hashlib.sha1((os.path.abspath(a.infile) + "|" + str(st.st_size) + "|" + str(int(st.st_mtime))).encode()).hexdigest()[:16]
+cache_dir = os.path.join(HERE, 'stems', key + '_' + a.model + 's' + str(a.shifts))
+stem_wav  = os.path.join(cache_dir, a.model, a.stem + '.wav')
+if not os.path.exists(stem_wav):
+    print("separating (" + a.model + ", shifts=" + str(a.shifts) + ") -> " + key, flush=True)
+    os.makedirs(cache_dir, exist_ok=True)
+    # demucs decodes via ffmpeg, which may be absent. soundfile handles wav/flac/ogg/mp3
+    # directly, so hand demucs a plain WAV and drop the ffmpeg dependency entirely.
+    feed = os.path.join(cache_dir, '_input.wav')
+    d, dsr = sf.read(a.infile, dtype='float32', always_2d=True)
+    sf.write(feed, d, dsr, subtype='FLOAT')
+    del d
+    try:
+        subprocess.run([sys.executable, '-m', 'demucs', '-n', a.model, '-d', 'mps',
+                        '--shifts', str(a.shifts), '-o', cache_dir, '--filename', '{stem}.wav', feed],
+                       check=True, cwd=HERE)
+    finally:
+        if os.path.exists(feed):
+            os.remove(feed)
+else:
+    print("stems cached (" + key + ") - skipping separation", flush=True)
+
+other, sro = sf.read(stem_wav, dtype='float64', always_2d=True)
+if sro != SR:
+    g = gcd(SR, sro); other = resample_poly(other, SR//g, sro//g, axis=0)
+other = other[:n] if len(other) >= n else np.pad(other, ((0, n-len(other)), (0,0)))
+
+sos = butter(4, a.xover, 'low', fs=SR, output='sos')
+hi  = other - sosfiltfilt(sos, other, axis=0)
+M   = (hi[:,0] + hi[:,1]) / 2.0                       # directional part only
+beta = a.beta * np.clip(np.arange(n)/SR/a.ramp, 0, 1)
+mover_dry = beta * M
+anchor = orig - np.stack([mover_dry, mover_dry], 1)   # diffuse side-signal stays in here
+
+s  = sofar.read_sofa(os.path.join(HERE,'hrtf','D1_HRIR_SOFA',SOFA[SR]), verify=False)
+IR = np.array(s.Data_IR); P = np.array(s.SourcePosition)
+ar, er = np.deg2rad(P[:,0]), np.deg2rad(P[:,1])
+grid = np.stack([np.cos(er)*np.cos(ar), np.cos(er)*np.sin(ar), np.sin(er)], 1)
+
+BLOCK = 4096; HOP = BLOCK//2
+starts = np.arange(0, n, HOP); tb = (starts + BLOCK/2)/SR
+az = np.deg2rad((360*tb/a.orbit) % 360); el = np.deg2rad(a.elev*np.sin(2*np.pi*tb/37.0))
+v = np.stack([np.cos(el)*np.cos(az), np.cos(el)*np.sin(az), np.sin(el)], -1)
+idx = np.argmax(grid @ v.T, axis=0)
+
+NFFT = 1 << int(np.ceil(np.log2(BLOCK + IR.shape[2] - 1))); cache = {}
+def hf(i):
+    if i not in cache: cache[i] = np.fft.rfft(IR[i], NFFT, axis=-1)
+    return cache[i]
+win = np.hanning(BLOCK+1)[:BLOCK]; out = np.zeros((n+NFFT, 2))
+print(f"rendering {len(starts)} blocks...")
+for k, st in enumerate(starts):
+    blk = mover_dry[st:st+BLOCK]
+    if len(blk) < BLOCK: blk = np.concatenate([blk, np.zeros(BLOCK-len(blk))])
+    if not blk.any(): continue
+    out[st:st+NFFT] += np.fft.irfft(np.fft.rfft(blk*win, NFFT)*hf(idx[k]), NFFT, axis=-1).T
+mover = out[:n]
+mover *= np.sqrt(np.mean(mover_dry**2))/np.sqrt(np.mean(mover**2))*np.sqrt(2)
+mix = anchor + mover
+mix *= 0.97/np.abs(mix).max()
+
+outp = a.out or (os.path.splitext(a.infile)[0] + '_binaural.flac')
+sf.write(outp, mix, SR, subtype='PCM_24')
+
+def iacc(x):
+    L,R = x[:,0]-x[:,0].mean(), x[:,1]-x[:,1].mean()
+    return float(np.dot(L,R)/(np.linalg.norm(L)*np.linalg.norm(R)))
+lp = butter(4, a.xover, 'low', fs=SR, output='sos')
+print(json.dumps({"output": outp, "sr": SR, "orbit": a.orbit, "elev": a.elev, "ramp": a.ramp, "beta": a.beta, "xover": a.xover, "duration": n/SR,
+  "iacc_orig": round(iacc(orig),3), "iacc_out": round(iacc(mix),3),
+  "bass_iacc_orig": round(iacc(sosfiltfilt(lp,orig,axis=0)),3),
+  "bass_iacc_out":  round(iacc(sosfiltfilt(lp,mix,axis=0)),3),
+  "peak": round(float(np.abs(mix).max()),3)}, indent=2))
