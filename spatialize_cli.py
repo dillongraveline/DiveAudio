@@ -18,17 +18,18 @@ SOFA = {44100: 'D1_44K_16bit_256tap_FIR_SOFA.sofa',
         96000: 'D1_96K_24bit_512tap_FIR_SOFA.sofa'}
 
 p = argparse.ArgumentParser()
-p.add_argument('infile'); p.add_argument('--beta', type=float, default=0.85)
-p.add_argument('--orbit', type=float, default=50.0); p.add_argument('--xover', type=float, default=200.0)
+p.add_argument('infile'); p.add_argument('--beta', type=float, default=0.92)
+p.add_argument('--orbit', type=float, default=43.0); p.add_argument('--xover', type=float, default=200.0)
 p.add_argument('--elev', type=float, default=25.0); p.add_argument('--ramp', type=float, default=20.0)
 p.add_argument('--stem', default='other', choices=['other','vocals','drums','bass'])
 p.add_argument('--out', default=None)
-p.add_argument('--preset', default=None, choices=['subtle','natural','wide'])
+p.add_argument('--preset', default=None, choices=['subtle','natural','default','wide'])
 p.add_argument('--model', default='htdemucs')
 p.add_argument('--shifts', type=int, default=0)
 a = p.parse_args()
 if a.preset:
-    a.beta, a.orbit = {'subtle': (0.60, 72.0), 'natural': (0.85, 50.0), 'wide': (1.0, 36.0)}[a.preset]
+    a.beta, a.orbit = {'subtle': (0.60, 72.0), 'natural': (0.85, 50.0),
+                    'default': (0.92, 43.0), 'wide': (1.0, 36.0)}[a.preset]
 
 def load_audio(path):
     """Decode anything we can. soundfile covers wav/flac/ogg/mp3; macOS
@@ -148,6 +149,35 @@ beta = a.beta * np.clip(np.arange(n)/SR/a.ramp, 0, 1)
 mover_dry = beta * M
 anchor = orig - np.stack([mover_dry, mover_dry], 1)   # diffuse side-signal stays in here
 
+# ---- very slow drift for the otherwise-anchored elements -------------------
+# These use constant-power AMPLITUDE panning, never HRTF: level only, so their
+# timbre is untouched. Only the directional (mid) component above the crossover
+# is moved, at low depth, and the period is tied to the track length so a source
+# takes roughly half the song to cross its (small) range. Bass never moves --
+# low-frequency panning is inaudible and only muddies the centre.
+SUBTLE = {'drums': (0.20, 0.34, 1.7), 'vocals': (0.18, 0.28, 4.0)}
+_tt   = np.arange(n) / SR
+_dur  = max(n / SR, 1.0)
+_ramp = np.clip(_tt / a.ramp, 0, 1)
+drift_info = {}
+for _name, (_bk, _span, _ph) in SUBTLE.items():
+    _sp = os.path.join(cache_dir, a.model, _name + '.wav')
+    try:
+        _d, _dsr = sf.read(_sp, dtype='float64', always_2d=True)
+    except Exception:
+        continue
+    if _dsr != SR:
+        _g = gcd(SR, _dsr); _d = resample_poly(_d, SR // _g, _dsr // _g, axis=0)
+    _d = _d[:n] if len(_d) >= n else np.pad(_d, ((0, n - len(_d)), (0, 0)))
+    _hi = _d - sosfiltfilt(sos, _d, axis=0)
+    _Mk = ((_hi[:, 0] + _hi[:, 1]) / 2.0) * _bk * _ramp
+    _pan = _span * np.sin(2 * np.pi * _tt / (_dur * 1.7) + _ph)
+    _ang = (_pan + 1.0) * (np.pi / 4.0)
+    anchor -= np.stack([_Mk, _Mk], 1)
+    anchor += np.stack([_Mk * np.cos(_ang), _Mk * np.sin(_ang)], 1) * np.sqrt(2.0)
+    drift_info[_name] = {'depth': _bk, 'span': _span, 'phase': _ph, 'period': _dur * 1.7}
+    del _d, _hi, _Mk
+
 s  = sofar.read_sofa(os.path.join(HERE,'hrtf','D1_HRIR_SOFA',SOFA[SR]), verify=False)
 IR = np.array(s.Data_IR); P = np.array(s.SourcePosition)
 ar, er = np.deg2rad(P[:,0]), np.deg2rad(P[:,1])
@@ -155,7 +185,17 @@ grid = np.stack([np.cos(er)*np.cos(ar), np.cos(er)*np.sin(ar), np.sin(er)], 1)
 
 BLOCK = 4096; HOP = BLOCK//2
 starts = np.arange(0, n, HOP); tb = (starts + BLOCK/2)/SR
-az = np.deg2rad((360*tb/a.orbit) % 360); el = np.deg2rad(a.elev*np.sin(2*np.pi*tb/37.0))
+# Quasi-random wander: sums of sines whose periods share no common multiple,
+# so the path never repeats. Coefficients tuned so RMS angular speed matches
+# the ~7 deg/s of the circular orbit this replaced.
+_s = a.orbit / 50.0
+_TAU = 2.0 * np.pi
+az_deg = 180.0 * (0.55 * np.sin(_TAU * tb / (97.0 * _s))
+                + 0.30 * np.sin(_TAU * tb / (61.0 * _s) + 1.7)
+                + 0.15 * np.sin(_TAU * tb / (37.0 * _s) + 4.1))
+el_deg = a.elev * 1.2 * (0.60 * np.sin(_TAU * tb / (71.0 * _s) + 0.8)
+                       + 0.40 * np.sin(_TAU * tb / (43.0 * _s) + 2.9))
+az = np.deg2rad(az_deg % 360.0); el = np.deg2rad(el_deg)
 v = np.stack([np.cos(el)*np.cos(az), np.cos(el)*np.sin(az), np.sin(el)], -1)
 idx = np.argmax(grid @ v.T, axis=0)
 
@@ -182,7 +222,7 @@ def iacc(x):
     L,R = x[:,0]-x[:,0].mean(), x[:,1]-x[:,1].mean()
     return float(np.dot(L,R)/(np.linalg.norm(L)*np.linalg.norm(R)))
 lp = butter(4, a.xover, 'low', fs=SR, output='sos')
-print(json.dumps({"output": outp, "sr": SR, "orbit": a.orbit, "elev": a.elev, "ramp": a.ramp, "beta": a.beta, "xover": a.xover, "duration": n/SR,
+print(json.dumps({"output": outp, "sr": SR, "drift": drift_info, "orbit": a.orbit, "elev": a.elev, "ramp": a.ramp, "beta": a.beta, "xover": a.xover, "duration": n/SR,
   "iacc_orig": round(iacc(orig),3), "iacc_out": round(iacc(mix),3),
   "bass_iacc_orig": round(iacc(sosfiltfilt(lp,orig,axis=0)),3),
   "bass_iacc_out":  round(iacc(sosfiltfilt(lp,mix,axis=0)),3),
