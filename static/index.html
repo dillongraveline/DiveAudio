@@ -182,10 +182,6 @@ text-decoration:none;cursor:pointer;white-space:nowrap;flex:0 0 auto}
   <footer>
     <button id="play" disabled aria-label="Play">▶</button>
     <div class="np"><div class="t" id="np-t">Nothing loaded</div><div class="s" id="np-s">Pick a track</div></div>
-    <div class="seg" id="presets" role="group" aria-label="Preset">
-      <button data-p="subtle">Subtle</button><button data-p="natural">Natural</button>
-      <button data-p="default" class="on">Default</button><button data-p="wide">Wide</button>
-      <button data-p="stage">Stage</button></div>
     <a class="dl" id="dl" href="#" download>&#8595;&nbsp; FLAC</a>
     <a class="dl" id="dlm" href="#" download>&#8595;&nbsp; M4A</a>
     <div class="scrub"><div class="bar" id="bar"><div class="fill" id="fill"></div></div>
@@ -197,9 +193,9 @@ text-decoration:none;cursor:pointer;white-space:nowrap;flex:0 0 auto}
 <script src="/static/three.min.js"></script>
 <script>
 const $=s=>document.querySelector(s);
-const SESSION="diveaudio.session", PRESET_KEY="diveaudio.preset";
-let preset="default";
-try{ preset=localStorage.getItem(PRESET_KEY)||"default"; }catch(e){}
+const SESSION="diveaudio.session";
+// One preset. The others remain available from the CLI via --preset.
+const preset="stage";
 // meta is replaced, never accumulated: switching away from 'stage' must not
 // leave a stale vocal_path behind, or the orb keeps walking a path the audio
 // no longer takes.
@@ -249,21 +245,6 @@ const aside=document.querySelector("aside");
 ["dragenter","dragover"].forEach(ev=>aside.addEventListener(ev,e=>{e.preventDefault();aside.classList.add("drag");}));
 ["dragleave","drop"].forEach(ev=>aside.addEventListener(ev,e=>{e.preventDefault();aside.classList.remove("drag");}));
 aside.addEventListener("drop",e=>{ if(e.dataTransfer.files.length) upload(e.dataTransfer.files); });
-function paintPresets(){
-  document.querySelectorAll("#presets button").forEach(b=>
-    b.classList.toggle("on", b.dataset.p===preset));
-}
-document.querySelectorAll("#presets button").forEach(b=>{
-  b.onclick=()=>{
-    if(b.dataset.p===preset) return;
-    preset=b.dataset.p;
-    try{ localStorage.setItem(PRESET_KEY,preset); }catch(e){}
-    paintPresets();
-    if(curPath) startRender();      // cached presets come back instantly
-  };
-});
-paintPresets();
-
 let tmr; $("#q").oninput=e=>{clearTimeout(tmr);tmr=setTimeout(()=>load(e.target.value),160)};
 
 /* ---------- the ring ----------

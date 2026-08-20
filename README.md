@@ -112,6 +112,9 @@ moved by level alone, which is why the master survives intact underneath.
 
 ### The `stage` preset
 
+This is what the app renders. The other presets remain available from the CLI
+via `--preset`, and each caches independently.
+
 `stage` additionally HRTF-renders the vocal's directional mid, on a **bounded
 front arc** rather than the free wander — a singer works a stage in front of you,
 they do not orbit your head. Measured on a 9:38 track:
