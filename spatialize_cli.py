@@ -7,7 +7,7 @@ Moves only the DIRECTIONAL component of the non-percussive layer; the diffuse
 field, the bass and the drums are never HRTF-filtered and never reconstructed
 from stems, so the original master survives underneath.
 """
-import sys, os, json, subprocess, argparse, hashlib
+import sys, os, json, subprocess, argparse, hashlib, fcntl, shutil, uuid
 import numpy as np, soundfile as sf, sofar
 from scipy.signal import resample_poly, butter, sosfiltfilt
 from math import gcd
@@ -40,32 +40,88 @@ if sr0 != SR:
     g = gcd(SR, sr0); orig = resample_poly(orig, SR//g, sr0//g, axis=0)
 n = len(orig)
 
-st = os.stat(a.infile)
-key = hashlib.sha1((os.path.abspath(a.infile) + "|" + str(st.st_size) + "|" + str(int(st.st_mtime))).encode()).hexdigest()[:16]
-cache_dir = os.path.join(HERE, 'stems', key + '_' + a.model + 's' + str(a.shifts))
+STEMS = ('drums', 'bass', 'other', 'vocals')
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+# Key the cache on the file's CONTENT, never its path or mtime, so two different
+# songs can never collide and a re-encoded file never reuses stale stems.
+_si = sf.info(a.infile)
+SRC_SHA, SRC_SECONDS = _sha256(a.infile), _si.frames / _si.samplerate
+key = SRC_SHA[:24] + '_' + a.model + '_s' + str(a.shifts)
+
+stems_root = os.path.join(HERE, 'stems')
+os.makedirs(stems_root, exist_ok=True)
+cache_dir = os.path.join(stems_root, key)
 stem_wav  = os.path.join(cache_dir, a.model, a.stem + '.wav')
-if not os.path.exists(stem_wav):
-    print("separating (" + a.model + ", shifts=" + str(a.shifts) + ") -> " + key, flush=True)
-    os.makedirs(cache_dir, exist_ok=True)
-    # demucs decodes via ffmpeg, which may be absent. soundfile handles wav/flac/ogg/mp3
-    # directly, so hand demucs a plain WAV and drop the ffmpeg dependency entirely.
-    feed = os.path.join(cache_dir, '_input.wav')
-    d, dsr = sf.read(a.infile, dtype='float32', always_2d=True)
-    sf.write(feed, d, dsr, subtype='FLOAT')
-    del d
+
+def _cache_ok():
+    """A cache entry counts only if its manifest proves it came from THIS file."""
     try:
-        subprocess.run([sys.executable, '-m', 'demucs', '-n', a.model, '-d', 'mps',
-                        '--shifts', str(a.shifts), '-o', cache_dir, '--filename', '{stem}.wav', feed],
-                       check=True, cwd=HERE)
-    finally:
-        if os.path.exists(feed):
+        m = json.load(open(os.path.join(cache_dir, 'manifest.json')))
+    except Exception:
+        return False
+    if m.get('src_sha256') != SRC_SHA: return False
+    if m.get('model') != a.model or m.get('shifts') != a.shifts: return False
+    for s in STEMS:
+        sp = os.path.join(cache_dir, a.model, s + '.wav')
+        try:
+            si = sf.info(sp)
+        except Exception:
+            return False
+        if abs(si.frames / si.samplerate - SRC_SECONDS) > 0.25:
+            return False
+    return True
+
+# Exclusive lock per cache key: concurrent runs on the same file serialise, and
+# the lock is released by the OS even if the process is killed.
+with open(os.path.join(stems_root, key + '.lock'), 'w') as _lf:
+    fcntl.flock(_lf, fcntl.LOCK_EX)
+    if _cache_ok():
+        print("stems cached (" + key[:12] + ") - skipping separation", flush=True)
+    else:
+        print("separating (" + a.model + ", shifts=" + str(a.shifts) + ") -> " + key[:12], flush=True)
+        shutil.rmtree(cache_dir, ignore_errors=True)
+        tmp_dir = cache_dir + '.tmp.' + uuid.uuid4().hex[:8]
+        os.makedirs(tmp_dir, exist_ok=True)
+        try:
+            # demucs decodes via ffmpeg, which may be absent; soundfile handles
+            # wav/flac/ogg/mp3 directly, so feed demucs a plain WAV instead.
+            feed = os.path.join(tmp_dir, '_input.wav')
+            _d, _dsr = sf.read(a.infile, dtype='float32', always_2d=True)
+            sf.write(feed, _d, _dsr, subtype='FLOAT')
+            del _d
+            subprocess.run([sys.executable, '-m', 'demucs', '-n', a.model, '-d', 'mps',
+                            '--shifts', str(a.shifts), '-o', tmp_dir,
+                            '--filename', '{stem}.wav', feed], check=True, cwd=HERE)
             os.remove(feed)
-else:
-    print("stems cached (" + key + ") - skipping separation", flush=True)
+            # Validate BEFORE publishing: a stem from another song would not
+            # match this source's duration.
+            for s in STEMS:
+                si = sf.info(os.path.join(tmp_dir, a.model, s + '.wav'))
+                if abs(si.frames / si.samplerate - SRC_SECONDS) > 0.25:
+                    raise RuntimeError('stem ' + s + ' duration does not match source')
+            json.dump({'src_sha256': SRC_SHA, 'src_seconds': SRC_SECONDS,
+                       'src_name': os.path.basename(a.infile),
+                       'model': a.model, 'shifts': a.shifts, 'stems': list(STEMS)},
+                      open(os.path.join(tmp_dir, 'manifest.json'), 'w'), indent=2)
+            # Atomic publish: the cache dir appears complete or not at all.
+            os.rename(tmp_dir, cache_dir)
+        except BaseException:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
 
 other, sro = sf.read(stem_wav, dtype='float64', always_2d=True)
 if sro != SR:
     g = gcd(SR, sro); other = resample_poly(other, SR//g, sro//g, axis=0)
+if abs(len(other) / SR - n / SR) > 0.25:
+    raise RuntimeError("stem/source length mismatch (%.2fs vs %.2fs) - refusing to mix"
+                       % (len(other) / SR, n / SR))
 other = other[:n] if len(other) >= n else np.pad(other, ((0, n-len(other)), (0,0)))
 
 sos = butter(4, a.xover, 'low', fs=SR, output='sos')
