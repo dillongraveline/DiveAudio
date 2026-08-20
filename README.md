@@ -84,58 +84,32 @@ Point it at your music by editing `config.json`, or drag files onto the sidebar.
 
 Everything runs on your machine. No account, no upload, no cloud.
 
-## How motion works
+## Three modes
 
-Nothing follows a circle. The wandering source uses **sums of sines with
-pairwise-incommensurate periods** (97 / 61 / 37 s in azimuth, 71 / 43 s in
-elevation), so the path never repeats — yet it stays a pure function of time,
-which means the renderer and the browser compute the identical trajectory
-independently. RMS angular speed is ~7.8 °/s.
-
-The anchored sources drift too, but by **constant-power amplitude panning, never
-HRTF** — level only, so their timbre is untouched. Depth is low and the period is
-tied to track length, so a source takes roughly half the song to traverse its
-range.
-
-**Bass never moves.** Low-frequency panning is inaudible and only muddies the
-centre.
-
-| | stem | behaviour | HRTF? |
-|---|---|---|---|
-| 🟣 | bass | fixed, dead centre | no |
-| 🟠 | drums | drifts by amplitude pan, very slowly | no |
-| ⚪ | vocals | drifts by amplitude pan — or walks the stage under `stage` | only under `stage` |
-| 🟢 | other | wanders freely | **yes** |
-
-Only the 🟢 layer is HRTF-convolved by default. Everything else is either fixed or
-moved by level alone, which is why the master survives intact underneath.
-
-### Three modes
-
-The app offers three, and switching between them **never interrupts playback**:
-the outgoing stream keeps playing while the incoming one loads and seeks to the
-same timestamp, and only once it can actually play do the two cross-fade. That
-holds even when the target still has to be rendered — you keep listening to what
-you had until the moment the new one is ready.
+Switching between them **never interrupts playback**. Changing `src` on an audio
+element tears down its buffer, so there are two: the outgoing stream keeps
+playing while the incoming one loads and seeks to the same timestamp, and only
+once it can actually play do the two cross-fade. That holds even when the target
+still has to be rendered — you keep listening to what you had, with progress on
+the header ring rather than a blocking overlay, until the moment it is ready.
 
 | mode | what you hear | render |
 |---|---|---|
 | **Off** | your original file, untouched | none — instant |
 | **Enhanced** | the `default` preset | one HRTF mover |
-| **Stage Simulator** | `stage`: the vocal walks a stage too | two HRTF movers |
+| **Stage Simulator** | `stage` — the vocal walks a stage too | two HRTF movers |
 
-`Off` is the honest baseline for an A/B, and because nothing is being steered the
-3D view holds still rather than animating motion the audio does not contain. The
-download button always gives you whatever is currently selected. `subtle`,
-`natural` and `wide` remain available from the CLI via `--preset`.
+`Off` is the honest baseline for an A/B: no processing, no wait. Because nothing
+is being steered, the 3D view **holds still** rather than animating motion the
+audio does not contain. The download button always gives you whatever is
+selected. `subtle`, `natural` and `wide` remain available from the CLI.
 
-The endpoint serving your untouched files will only serve paths that are already
-in the library index — the server binds `0.0.0.0` with no authentication, so a
-path parameter must never become a way to read arbitrary files off the machine.
+### What `Stage Simulator` adds
 
-`stage` additionally HRTF-renders the vocal's directional mid, on a **bounded
-front arc** rather than the free wander — a singer works a stage in front of you,
-they do not orbit your head. Measured on a 9:38 track:
+It HRTF-renders the vocal's directional mid as well, along a **bounded front arc**
+rather than the free wander — a singer works a stage in front of you, they do not
+orbit your head. The same subtraction design applies, so the diffuse part of the
+vocal is never touched. Measured on a 9:38 track:
 
 | IACC *(lower = wider)* | source | `default` | `stage` | |
 |---|---:|---:|---:|---|
@@ -144,27 +118,59 @@ they do not orbit your head. Measured on a 9:38 track:
 | above 2 kHz | 0.498 | 0.251 | **0.128** | wider |
 | sub-200 Hz *(must not change)* | 0.987 | 0.984 | 0.984 | bass still anchored |
 
-The narrowing failure mode this design exists to avoid did **not** occur — vocals
-are dry and direct enough that their mid really is directional. Isolating what
-the preset adds (`stage − default`, 11.6 dB below the mix), its interaural delay
-tracks the intended path in **98%** of windows, swinging ±291 µs against a
-~700 µs full-head width, crossing centre 48 times per song. The old vocal drift
-crossed centre **zero** times in the same track.
+The narrowing failure mode this architecture exists to avoid did **not** occur —
+vocals are dry and direct enough that their mid really is directional. Isolating
+what the mode adds (`stage − default`, 11.6 dB below the mix), its interaural
+delay tracks the intended path in **98%** of windows, swinging ±291 µs against a
+~700 µs full-head width and crossing centre 48 times per song. The vocal drift it
+replaces crossed centre **zero** times in the same track.
+
+## How motion works
+
+Nothing follows a circle. The wandering source uses **sums of sines with
+pairwise-incommensurate periods** (97 / 61 / 37 s in azimuth, 71 / 43 s in
+elevation), so the path never repeats — yet it stays a pure function of time,
+which means the renderer and the browser compute the identical trajectory
+independently. RMS angular speed is ~7.8 °/s.
+
+The anchored sources drift by **constant-power amplitude panning, never HRTF** —
+level only, so their timbre is untouched. Depth is low and the period is 1.7× the
+track length, which is deliberately slower than the ear tracks: on a 9:38 track
+the drift never completes a pass. That subtlety is the point for drums; it is
+also exactly why `Stage Simulator` exists for vocals.
+
+**Bass never moves.** Low-frequency panning is inaudible and only muddies the
+centre.
+
+| | stem | Enhanced | Stage Simulator | HRTF? |
+|---|---|---|---|---|
+| 🟣 | bass | fixed, dead centre | fixed, dead centre | never |
+| 🟠 | drums | drifts by amplitude pan | drifts by amplitude pan | never |
+| ⚪ | vocals | drifts by amplitude pan | **walks a front arc** | under `stage` |
+| 🟢 | other | wanders freely | wanders freely | **always** |
+
+A stem is steered one way or the other, never both: when the vocal is
+HRTF-rendered it leaves the amplitude-pan drift entirely.
+
+## What the 3D view shows
 
 Orb size is driven by **real per-stem RMS envelopes** computed at separation time,
 not by frequency bands of the mix — so each orb pulses with its own instrument.
 
 Wavefronts reflect off the walls by the **image-source method**: a reflection is a
 virtual source mirrored across the wall plane, so the reflected front expands from
-that mirror point on the same clock and appears only once the direct front has
-actually reached the wall.
+that mirror point on the same clock and becomes visible only once the direct front
+has actually reached the wall. A clipping plane per wall hides the half outside
+the room, so the front reads as coming off the surface.
 
 > **Left is left.** SOFA is `+y = left`; three.js is `+x = screen-right`, so the
 > mapping needs a sign flip. It was missing, and every HRTF-rendered position was
-> drawn mirrored. `tests/test_orientation.py` pins the convention against the
-> SADIE data itself — azimuth +90° is measurably 5.8× louder and 22 samples
-> earlier in the left ear — and `tests/test_path_parity.py` holds the browser's
-> trajectory against the renderer's.
+> drawn **mirrored** — the orb sat right while the sound came from the left.
+> `tests/test_orientation.py` pins the convention against the SADIE data itself
+> (azimuth +90° is 5.8× louder and 22 samples earlier in the left ear), and
+> `tests/test_path_parity.py` holds the browser's trajectory against the
+> renderer's, so the claim that the picture matches the audio is now checked
+> rather than asserted.
 
 ## CLI
 
@@ -178,6 +184,8 @@ actually reached the wall.
 | `--beta` | 0.92 | fraction of the texture layer that moves |
 | `--orbit` | 43 | motion time-base, seconds |
 | `--xover` | 200 | Hz below which nothing moves |
+| `--elev` | 25 | vertical excursion of the wandering source, degrees |
+| `--ramp` | 20 | seconds over which the motion fades in from centre |
 | `--stem` | other | which layer becomes the mover |
 | `--model` | htdemucs | `htdemucs_ft` is better and ~4× slower |
 | `--shifts` | 0 | prediction averaging; raises quality and cost |
@@ -185,6 +193,7 @@ actually reached the wall.
 | `--vocal-arc` | 55 | half-width in degrees of the stage the vocal walks |
 | `--vocal-elev` | 9 | vertical excursion of the vocal path, degrees |
 | `--batch` | auto | HRTF blocks per batched transform; auto-sized to a 128 MB budget |
+| `--out` | *alongside input* | where to write the rendered FLAC |
 | `--json` | off | print the result metadata as JSON instead of a one-line summary |
 
 Progress is printed as it happens, interleaving human lines with machine-readable
@@ -224,7 +233,7 @@ path with a metadata sidecar, so:
 
 Before this, every click produced a fresh job and another copy of the same audio.
 
-## What you see while it works
+## While it renders
 
 The processing view is a ring whose **segments are sized by each stage's measured
 share of the wall clock**, so its shape is the answer to "what is taking the
@@ -251,6 +260,23 @@ MP3, M4A, AAC and ALAC all work with **no ffmpeg required**.
 > the decoded audio, never the header.
 
 Output downloads as lossless FLAC, or AAC in M4A at roughly 1/6 the size.
+
+## Playing in the browser
+
+`Off` streams your original file from `/api/source`, which takes a path — so it
+serves **only paths already in the library index**. Traversals and anything
+outside your configured music directories are refused, because the server binds
+`0.0.0.0` with no authentication and a path parameter must never become a way to
+read arbitrary files off the machine.
+
+The player builds its Web Audio graph **only inside a real user gesture**, and
+only once the AudioContext is confirmed running. Safari starts a context
+suspended unless it is created from a gesture, while `createMediaElementSource`
+*permanently* reroutes the element into that context — do both off a programmatic
+`play()` and the element ends up feeding a graph that never runs. Controls move,
+the scrubber advances, and there is no sound at all, irreversibly. If the context
+cannot be started the elements simply keep their native output; the visualiser
+does not need it, because per-stem levels come from the server's envelopes.
 
 ## Known limitations
 
@@ -280,13 +306,17 @@ The suite pins the parts where a mistake would be silent rather than loud:
 | `test_envelope.py` | streaming RMS envelopes match the whole-file computation |
 | `test_progress.py` | the progress channel survives real subprocess output and skipped stages |
 | `test_render_cache.py` | keying, truncated-render rejection, LRU pruning, orphan sweeping |
-| `test_server.py` | a second click never starts a second render |
-| `test_orientation.py` | left is left: the drawn position matches the ear the sound favours |
+| `test_server.py` | a second click never starts a second render; `/api/source` refuses anything outside the library |
+| `test_orientation.py` | left is left: the drawn position matches the ear the sound actually favours |
 | `test_path_parity.py` | the browser and the renderer compute the same trajectory |
 | `test_paths.py` | the vocalist stays on the stage and in front of the listener |
 | `test_ui.py` | ring geometry, the detail formatter, and that every `$("#id")` resolves |
 
-`tests/check_ui.js` runs under node and is skipped if node is absent.
+`tests/check_ui.js` and `tests/dump_paths.js` run under node and are skipped if
+node is absent. Two tests are worth calling out as the pattern the rest follow:
+`test_dsp.py` keeps a **verbatim copy** of the loop it replaced and holds the new
+implementation against it, and `test_orientation.py` reads the SADIE file to
+establish which ear is which rather than trusting the specification.
 
 ## Credits
 
