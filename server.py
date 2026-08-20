@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-import progress, render_cache
+import dsp, progress, render_cache
 
 HERE = Path(__file__).parent
 PY   = str(HERE / ".venv/bin/python")
@@ -201,6 +201,41 @@ async def upload(file: UploadFile = File(...)):
             f.write(chunk); size += len(chunk)
     reindex()
     return {"path": str(dest), "name": dest.stem, "dir": "uploads", "bytes": size}
+
+
+_loudness = {}
+
+
+def _measure_loudness(path):
+    """A-weighted level of a file over the shared window, memoised by content."""
+    import soundfile as sf
+    sha = render_cache.source_sha256(path)
+    if sha in _loudness:
+        return _loudness[sha]
+    info = sf.info(str(path))
+    start, frames = dsp.loudness_window(info.frames, info.samplerate)
+    x, sr = sf.read(str(path), start=start, frames=frames,
+                    dtype='float32', always_2d=True)
+    _loudness[sha] = round(dsp.a_weighted_db(x, sr), 2)
+    return _loudness[sha]
+
+
+@app.get("/api/loudness")
+def loudness(path: str):
+    """Level of an untouched library file, so 'Off' can be matched to the
+    renders without having rendered anything."""
+    if not _index:
+        reindex()
+    try:
+        p = Path(path).resolve(strict=True)
+    except OSError:
+        return JSONResponse({"error": "file not found"}, status_code=404)
+    if str(p) not in _index_paths:
+        return JSONResponse({"error": "not in the library"}, status_code=403)
+    try:
+        return {"aw": _measure_loudness(p)}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 SOURCE_TYPES = {".flac": "audio/flac", ".wav": "audio/wav", ".aif": "audio/aiff",

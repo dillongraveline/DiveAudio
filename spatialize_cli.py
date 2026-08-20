@@ -278,6 +278,9 @@ def iacc(x):
 lp = butter(4, a.xover, 'low', fs=SR, output='sos')
 IACC_ORIG = iacc(orig)
 BASS_IACC_ORIG = iacc(sosfiltfilt(lp, orig, axis=0))
+# Level of the source, so the player can match modes without re-rendering.
+_ls, _lf = dsp.loudness_window(len(orig), SR)
+AW_SRC = dsp.a_weighted_db(orig[_ls:_ls + _lf], SR)
 del orig
 
 # ---- very slow drift for the otherwise-anchored elements -------------------
@@ -387,7 +390,14 @@ del mover_dry, vocal_dry
 anchor += mover                                # in place; anchor becomes the mix
 del mover
 mix = anchor
+# Peak normalisation only. Subtracting the mover and adding an HRTF'd copy back
+# raises the peak well above the source's, so this costs real loudness -- about
+# 7.5 dB on a limited master. It is not corrected here: raising the render would
+# clip, and limiting it would spend the fidelity this whole design protects. The
+# player matches levels across modes instead, using the figures below.
 mix *= 0.97/np.abs(mix).max()
+_ls, _lf = dsp.loudness_window(len(mix), SR)
+AW_OUT = dsp.a_weighted_db(mix[_ls:_ls + _lf], SR)
 
 # ---------------------------------------------------------------- encode ----
 outp = a.out or (os.path.splitext(a.infile)[0] + '_binaural.flac')
@@ -398,7 +408,7 @@ sf.write(outp, mix, SR, subtype='PCM_24')
 meta = {"output": outp, "sr": SR, "drift": drift_info, "env_file": env_path,
   "orbit": a.orbit, "elev": a.elev, "ramp": a.ramp, "beta": a.beta,
   "xover": a.xover, "duration": n/SR, "blocks": int(len(starts)), "batch": int(BATCH),
-  "preset": a.preset, "movers": [m[0] for m in MOVERS],
+  "preset": a.preset, "aw_src": round(AW_SRC, 2), "aw_out": round(AW_OUT, 2), "movers": [m[0] for m in MOVERS],
   "vocal_path": ({"arc": a.vocal_arc, "elev": a.vocal_elev, "beta": a.vocal_beta}
                  if VOCAL_HRTF else None),
   "iacc_orig": round(IACC_ORIG,3), "iacc_out": round(iacc(mix),3),

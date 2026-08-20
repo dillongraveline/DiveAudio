@@ -99,6 +99,17 @@ the header ring rather than a blocking overlay, until the moment it is ready.
 | **Enhanced** | the `default` preset | one HRTF mover |
 | **Stage Simulator** | `stage` — the vocal walks a stage too | two HRTF movers |
 
+**Every mode is loudness-matched**, or the comparison is worthless. Peak
+normalising a render costs real level — subtracting the mover and adding an
+HRTF'd copy back raises the peak far more than the loudness, about **7.9 dB**
+against a limited master — so `Off` would simply sound better by being louder.
+The renders cannot be raised to meet it: they would clip, and limiting them
+would spend exactly the fidelity this design protects. So the player attenuates
+every mode to the quietest of them and **never boosts anything**. Each render
+records its own A-weighted level, sources are measured directly, and the trim in
+use is shown next to the mode buttons. On a 9:38 track it takes the spread from
+8.5 dB to 0.34 dB overall, and 1.09 dB to 0.27 dB in the vocal band.
+
 `Off` is the honest baseline for an A/B: no processing, no wait. Because nothing
 is being steered, the 3D view **holds still** rather than animating motion the
 audio does not contain. The download button always gives you whatever is
@@ -310,6 +321,7 @@ The suite pins the parts where a mistake would be silent rather than loud:
 | `test_orientation.py` | left is left: the drawn position matches the ear the sound actually favours |
 | `test_path_parity.py` | the browser and the renderer compute the same trajectory |
 | `test_paths.py` | the vocalist stays on the stage and in front of the listener |
+| `test_loudness.py` | A-weighted measurement, including that it discounts bass and notices decorrelation |
 | `test_ui.py` | ring geometry, the detail formatter, and that every `$("#id")` resolves |
 
 `tests/check_ui.js` and `tests/dump_paths.js` run under node and are skipped if

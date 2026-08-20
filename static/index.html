@@ -102,6 +102,8 @@ padding:6px 13px;border-radius:7px;cursor:pointer;white-space:nowrap}
 .seg button:hover{color:var(--txt)}
 .seg button.on{background:#22304A;color:var(--mover);font-weight:600}
 .seg button.pending{color:var(--mover);opacity:.75}
+#trim{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;
+white-space:nowrap;flex:0 0 auto}
 /* a compact ring in the header keeps the job visible if the overlay is dismissed */
 #mini{display:none;align-items:center;gap:7px;font-variant-numeric:tabular-nums;cursor:pointer}
 #mini.on{display:flex}
@@ -196,6 +198,7 @@ padding:6px 13px;border-radius:7px;cursor:pointer;white-space:nowrap}
     <div class="seg" id="modes" role="group" aria-label="Spatialisation mode">
       <button data-m="off">Off</button><button data-m="enhanced">Enhanced</button
       ><button data-m="stage">Stage Simulator</button></div>
+    <span id="trim" title="Modes are matched in loudness so the comparison is fair"></span>
     <a class="dl" id="dl" href="#" download>&#8595;&nbsp; FLAC</a>
     <a class="dl" id="dlm" href="#" download>&#8595;&nbsp; M4A</a>
     <div class="scrub"><div class="bar" id="bar"><div class="fill" id="fill"></div></div>
@@ -453,6 +456,7 @@ async function swapTo(url){
   const from=cur, to=idle();
   const at=isFinite(from.currentTime)?from.currentTime:0;
   const playing=!from.paused && !from.ended;
+  const g=gainFor(mode), g0=from.volume;
   swapping=true;
   try{
     to.pause();
@@ -470,19 +474,68 @@ async function swapTo(url){
       await new Promise(res=>{
         const step=()=>{
           const k=Math.min(1,(performance.now()-t0)/XFADE);
-          to.volume=k; from.volume=1-k;
+          to.volume=k*g; from.volume=(1-k)*g0;
           if(k<1) requestAnimationFrame(step); else res();
         };
         step();
       });
       from.pause();
     }
-    from.volume=1; to.volume=1;
+    from.volume=1; to.volume=g;
     from.removeAttribute("src"); from.load();   // release the old buffer
     cur=to;
   } finally { swapping=false; }
-  paintTimes();
+  cur.volume=gainFor(mode);
+  paintTimes(); paintTrim();
   if(!cur.paused) disarm();
+}
+
+/* ---------- loudness matching ----------
+   Peak-normalising a render costs real loudness -- about 7.5 dB against a
+   limited master -- because subtracting the mover and adding an HRTF'd copy
+   back raises the peak far more than the level. Left alone, Off simply sounds
+   better than the processed modes, which makes the comparison worthless.
+   Raising the renders is not available: they would clip, and limiting them
+   would spend exactly the fidelity this project protects. So every mode is
+   attenuated to the quietest of them. Nothing is ever boosted. */
+let levels={}, gains={};
+const gainFor=m=>(gains[m]!=null?gains[m]:1);
+
+function recomputeGains(){
+  const known=Object.entries(levels).filter(([,v])=>isFinite(v));
+  gains={};
+  if(known.length>=2){
+    const target=Math.min(...known.map(([,v])=>v));
+    for(const [k,v] of known) gains[k]=Math.pow(10,(target-v)/20);
+  }
+  if(!swapping) cur.volume=gainFor(mode);
+  paintTrim();
+}
+function paintTrim(){
+  const g=gainFor(mode), db=20*Math.log10(g||1);
+  $("#trim").textContent=(db<-0.15)?db.toFixed(1)+" dB":"";
+  document.querySelectorAll("#modes button").forEach(b=>{
+    const bg=gainFor(b.dataset.m), bdb=20*Math.log10(bg||1);
+    b.title=(bdb<-0.15)?("trimmed "+bdb.toFixed(1)+" dB to match the other modes")
+                       :"no trim needed";
+  });
+}
+function noteLevel(id,v){
+  if(!isFinite(v)) return;
+  if(levels[id]===v) return;
+  levels[id]=v; recomputeGains();
+}
+/* Levels for every mode, gathered without rendering anything: the source is
+   measured directly, and a cached render already carries its own figure. */
+function prefetchLevels(){
+  const p=curPath; levels={}; gains={}; paintTrim();
+  fetch("/api/loudness?path="+encodeURIComponent(p)).then(r=>r.ok?r.json():null)
+    .then(d=>{ if(curPath===p&&d) noteLevel("off",d.aw); }).catch(()=>{});
+  MODES.filter(m=>m.preset).forEach(m=>{
+    post("/api/resolve",{path:p,preset:m.preset})
+      .then(r=>{ if(curPath===p&&r&&r.cached&&r.meta) noteLevel(m.id,r.meta.aw_out); })
+      .catch(()=>{});
+  });
 }
 
 /* ---------- modes ---------- */
@@ -584,6 +637,7 @@ async function adopt(key,m){
   $("#mini").classList.remove("on");
   $("#play").disabled=false;
   paintDownloads(); saveSession();
+  noteLevel(modeOf(mode).id, (m||{}).aw_out);
   envData=null;
   fetch("/api/env/"+key).then(r=>r.ok?r.json():null)
     .then(d=>{envData=d;}).catch(()=>{envData=null;});
@@ -598,6 +652,7 @@ async function pick(t,el){
   curPath=t.path; curName=t.name; curDir=t.dir;
   $("#np-t").textContent=t.name; $("#np-s").textContent=t.dir;
   stopPoll(); curKey=null; curKeyPending=null; envData=null;
+  prefetchLevels();
   swapping=true;
   [auA,auB].forEach(e=>{ e.pause(); e.removeAttribute("src"); e.load(); e.volume=1; });
   swapping=false;
@@ -689,6 +744,7 @@ async function boot(){
   curPath=sess.path; curName=sess.name||""; curDir=sess.dir||"";
   $("#np-t").textContent=curName; $("#np-s").textContent=curDir;
   const row=rows.get(sess.path); if(row) row.classList.add("active");
+  prefetchLevels();
 
   if(mode==="off"){
     meta=Object.assign({},META_DEFAULTS); paintLegend(); paintDownloads();

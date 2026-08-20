@@ -158,3 +158,47 @@ def stage_path(t, arc, elev):
     el = elev * (0.60 * np.sin(TAU * t / 33.0 + 1.1)
                  + 0.40 * np.sin(TAU * t / 23.0 + 3.7))
     return az, el
+
+
+def a_weighting_sos(fs):
+    """IEC 61672 A-weighting as second-order sections.
+
+    Raw energy is a poor stand-in for how loud something sounds: bass carries
+    enormous power and modest loudness, so an unweighted comparison of two
+    mixes can be wrong by more than 10 dB.
+    """
+    from scipy.signal import bilinear_zpk, zpk2sos
+    f1, f2, f3, f4 = 20.598997, 107.65265, 737.86223, 12194.217
+    zeros = np.zeros(4)
+    poles = -2 * np.pi * np.array([f1, f1, f2, f3, f4, f4])
+    gain = (2 * np.pi * f4) ** 2 * (10 ** (1.9997 / 20))
+    return zpk2sos(*bilinear_zpk(zeros, poles, gain, fs))
+
+
+def a_weighted_db(x, fs):
+    """A-weighted level of a signal's mono sum, in dBFS.
+
+    The mono sum, not the per-channel average: two mixes can carry the same
+    energy per channel and still differ in perceived level when one of them is
+    decorrelated, which is exactly what HRTF rendering does.
+    """
+    from scipy.signal import sosfilt
+    mono = x.mean(axis=1) if getattr(x, "ndim", 1) > 1 else x
+    y = sosfilt(a_weighting_sos(fs), mono)
+    return float(20.0 * np.log10(np.sqrt(np.mean(y ** 2)) + 1e-15))
+
+
+LOUDNESS_WINDOW_S = 180.0
+
+
+def loudness_window(n_frames, sr):
+    """The span loudness is measured over: the centred LOUDNESS_WINDOW_S, or
+    the whole thing if it is shorter.
+
+    Source files and renders must use the same window or their levels are not
+    comparable, and comparing them is the entire point.
+    """
+    span = int(LOUDNESS_WINDOW_S * sr)
+    if n_frames <= span:
+        return 0, int(n_frames)
+    return int((n_frames - span) // 2), span
