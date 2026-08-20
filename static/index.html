@@ -4,14 +4,14 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#080910;--surface:#0F111A;--border:#1C2030;--txt:#E9EBF2;--muted:#6E7689;
---bass:#6B4BFF;--drums:#FF9F45;--vocals:#FFEBC2;--mover:#2FE3D0}
+--bass:#6B4BFF;--drums:#FF9F45;--vocals:#FFEBC2;--mover:#2FE3D0;--steel:#8892A6}
 body{background:var(--bg);color:var(--txt);font:14px/1.5 Inter,-apple-system,system-ui,sans-serif;
 height:100vh;display:flex;flex-direction:column;overflow:hidden}
 header{height:52px;background:var(--surface);display:flex;align-items:center;justify-content:space-between;
 padding:0 20px;flex:0 0 auto;border-bottom:1px solid var(--border)}
 .brand{display:flex;gap:9px;align-items:center;font-weight:600;letter-spacing:.3px}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--mover)}
-.eng{font-size:11px;color:var(--muted)}
+.eng{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:10px}
 main{flex:1;display:flex;min-height:0}
 aside{width:290px;background:var(--surface);border-right:1px solid var(--border);display:flex;
 flex-direction:column;flex:0 0 auto}
@@ -25,31 +25,67 @@ border-radius:9px;color:var(--muted);font-size:12px;cursor:pointer;white-space:n
 aside.drag{outline:2px dashed var(--mover);outline-offset:-6px}
 .scope{font-size:9.5px;letter-spacing:1px;color:var(--muted);padding:0 16px 8px;font-weight:600}
 #list{flex:1;overflow-y:auto;padding:0 8px 8px}
-.row{padding:9px 11px;border-radius:8px;cursor:pointer}
+.row{padding:9px 11px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:9px}
 .row:hover{background:#131826}
 .row.active{background:#17202E}
+.row .txt{min-width:0;flex:1}
 .row .t{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row.active .t{color:var(--mover);font-weight:600}
 .row .s{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* per-row state marks: a filling ring while this track renders, a dot when a
+   finished render is already on disk and will start instantly */
+.mark{width:15px;height:15px;flex:0 0 auto;display:none}
+.row.busy .mark,.row.ready .mark{display:block}
+.row.ready .mark{background:var(--mover);width:5px;height:5px;border-radius:50%;opacity:.65}
+.mark svg{display:block;transform:rotate(-90deg)}
 section{flex:1;display:flex;flex-direction:column;min-width:0}
 #view{flex:1;position:relative;min-height:0}
 #view canvas{display:block;position:absolute;inset:0;z-index:1}
 #legend{position:absolute;z-index:4;left:22px;bottom:18px;font-size:10.5px;line-height:1.9;color:var(--muted)}
 #legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px}
+
+/* ---------- processing overlay ---------- */
 #status{position:absolute;inset:0;z-index:5;display:none;flex-direction:column;align-items:center;
-justify-content:center;gap:14px;background:rgba(8,9,16,.93);text-align:center;padding:24px}
+justify-content:center;gap:0;background:rgba(8,9,16,.94);text-align:center;padding:20px;overflow-y:auto}
 #status.on{display:flex}
-#status .eb{font-size:10px;letter-spacing:2.2px;color:var(--mover);font-weight:600}
-#status .h{font-size:26px;font-weight:600}
-#status .sub{font-size:12.5px;color:var(--muted);max-width:420px}
+.ringwrap{position:relative;width:190px;height:190px;flex:0 0 auto}
+.ringwrap svg{width:100%;height:100%;display:block}
+.ringtext{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+#pct{font-size:40px;font-weight:200;letter-spacing:-1.5px;font-variant-numeric:tabular-nums;line-height:1}
+#pct sup{font-size:15px;font-weight:400;letter-spacing:0;vertical-align:super;color:var(--muted);margin-left:2px}
+#eta{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;min-height:16px}
+#st-eb{font-size:10px;letter-spacing:2.2px;font-weight:600;margin-top:16px;color:var(--mover)}
+#st-h{font-size:16px;font-weight:600;margin-top:7px;max-width:440px;white-space:nowrap;overflow:hidden;
+text-overflow:ellipsis}
+#st-sub{font-size:11.5px;color:var(--muted);max-width:460px;margin-top:6px;font-variant-numeric:tabular-nums;
+min-height:18px;line-height:1.55}
+/* the rail is the ring unrolled: same colours, same proportions, so the
+   segment widths keep reading as "share of the work" */
+#rail{display:flex;gap:3px;margin-top:18px;width:min(460px,86vw);height:3px}
+#rail div{height:100%;border-radius:2px;opacity:.22;transition:opacity .3s}
+#rail div.done,#rail div.now{opacity:1}
+#raillabels{display:flex;gap:3px;width:min(460px,86vw);margin-top:7px;font-size:8.5px;letter-spacing:.6px;
+color:var(--muted);text-transform:uppercase}
+#raillabels span{overflow:hidden;white-space:nowrap;text-overflow:clip}
+.logbtn{margin-top:18px;background:none;border:0;color:var(--muted);font:10px Inter,sans-serif;
+letter-spacing:1.4px;cursor:pointer;padding:6px 10px;text-transform:uppercase}
+.logbtn:hover{color:var(--mover)}
+#log{display:none;margin-top:8px;width:min(520px,90vw);max-height:150px;overflow-y:auto;text-align:left;
+background:#0B0D16;border:1px solid var(--border);border-radius:8px;padding:10px 12px;
+font:10.5px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);white-space:pre-wrap;
+word-break:break-word}
+#log.on{display:block}
+#status.err #st-eb{color:#FF9F45}
 footer{height:84px;background:var(--surface);border-top:1px solid var(--border);display:flex;
 align-items:center;gap:20px;padding:0 20px;flex:0 0 auto}
 #play{width:40px;height:40px;border-radius:50%;background:var(--mover);border:0;cursor:pointer;
 color:#06231F;font-size:15px;flex:0 0 auto}
 #play:disabled{opacity:.35;cursor:default}
+#play.armed{animation:armed 1.9s ease-in-out infinite}
+@keyframes armed{0%,100%{box-shadow:0 0 0 0 rgba(47,227,208,.45)}50%{box-shadow:0 0 0 9px rgba(47,227,208,0)}}
 .np{width:200px;min-width:0}
 .np .t{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.np .s{font-size:10.5px;color:var(--muted)}
+.np .s{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .scrub{flex:1;min-width:0}
 .bar{height:4px;background:#1A1F2E;border-radius:2px;cursor:pointer}
 .fill{height:100%;background:var(--mover);border-radius:2px;width:0}
@@ -59,49 +95,48 @@ border:1px solid var(--border);background:#141826;color:var(--txt);font-size:11.
 text-decoration:none;cursor:pointer;white-space:nowrap;flex:0 0 auto}
 .dl.on{display:inline-flex}
 .dl:hover{border-color:var(--mover);color:var(--mover)}
-.seg{display:flex;background:#141826;border:1px solid var(--border);border-radius:9px;padding:3px;flex:0 0 auto}
-.seg button{background:none;border:0;color:var(--muted);font:11.5px Inter,sans-serif;padding:6px 13px;
-border-radius:7px;cursor:pointer}
-.seg button.on{background:#22304A;color:var(--mover);font-weight:600}
+/* a compact ring in the header keeps the job visible if the overlay is dismissed */
+#mini{display:none;align-items:center;gap:7px;font-variant-numeric:tabular-nums;cursor:pointer}
+#mini.on{display:flex}
+#mini svg{display:block;transform:rotate(-90deg)}
+:focus-visible{outline:2px solid var(--mover);outline-offset:2px}
+@media (prefers-reduced-motion: reduce){
+  #play.armed{animation:none}
+  #rail div{transition:none}
+}
 
 /* ---------- mobile ---------- */
 @media (max-width: 780px){
   html,body{height:100vh;height:100dvh;overscroll-behavior:none}
   header{height:46px;padding:0 12px;flex:0 0 auto}
   .brand{font-size:13px}
-  .eng{font-size:9px;max-width:46%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-
-  /* single column; every flex child gets min-height:0 so nothing can overflow
-     its parent and collide with the next element */
+  .eng{font-size:9px;max-width:52%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   main{flex-direction:column;min-height:0}
   section{order:1;flex:1 1 auto;min-height:0}
   #view{flex:1 1 auto;min-height:160px}
   aside{order:2;width:100%;flex:0 0 auto;max-height:34vh;min-height:0;
         border-right:0;border-top:1px solid var(--border)}
   #list{min-height:0;-webkit-overflow-scrolling:touch}
-
   .searchwrap{padding:9px 12px 4px}
   #q{height:40px;font-size:16px}          /* 16px stops iOS zooming on focus */
   .up{height:38px;line-height:36px;margin-top:8px}
   .scope{padding:0 12px 6px}
   .row{padding:11px}
   .row .t{font-size:13.5px}
-
-  /* legend pinned to the top of the scene, away from the orbit, with a
-     backdrop so it never sits illegibly on top of an orb */
   #legend{top:0;left:0;right:0;bottom:auto;display:flex;flex-wrap:wrap;
           gap:2px 12px;padding:7px 12px 9px;font-size:9px;line-height:1.5;
           background:linear-gradient(180deg,rgba(8,9,16,.92),rgba(8,9,16,0))}
   #legend div{white-space:nowrap}
   #legend i{width:6px;height:6px;margin-right:5px}
-
+  .ringwrap{width:132px;height:132px}
+  #pct{font-size:29px}
+  #st-h{font-size:14px;max-width:80vw}
+  #st-sub{font-size:10.5px}
+  #raillabels{display:none}
   footer{height:auto;flex:0 0 auto;flex-wrap:wrap;gap:8px 12px;padding:9px 12px 12px}
   #play{order:1;width:44px;height:44px;font-size:16px}
   .dl{order:3;height:38px;padding:0 12px;font-size:11px}
   .np{order:2;width:auto;flex:1 1 0;min-width:0}
-  .scrub{order:5}
-  .seg{order:3;flex:1 1 100%;justify-content:space-between}
-  .seg button{flex:1 1 0;padding:10px 6px;font-size:12px}
   .scrub{order:4;flex:1 1 100%}
   .bar{height:6px}
   .times{margin-top:6px}
@@ -112,12 +147,14 @@ border-radius:7px;cursor:pointer}
   section{order:1;min-height:0}
   #legend{position:absolute;top:auto;bottom:6px;background:none;padding:0 0 0 12px}
   footer{flex-wrap:nowrap}
-  .seg{flex:0 0 auto}
   .scrub{flex:1 1 auto;order:3}
+  .ringwrap{width:112px;height:112px}
+  #pct{font-size:24px}
+  #rail,#st-sub{display:none}
 }
 </style></head><body>
 <header><div class="brand"><span class="dot"></span>DiveAudio</div>
-<div class="eng">SADIE II · KU100 · <span id="lan"></span></div></header>
+<div class="eng"><span id="mini" title="Show progress"></span>SADIE II · KU100 · <span id="lan"></span></div></header>
 <main>
 <aside>
   <div class="searchwrap"><input id="q" placeholder="Search your library" autocomplete="off">
@@ -129,12 +166,26 @@ border-radius:7px;cursor:pointer}
 <section>
   <div id="view">
     <div id="legend"></div>
-    <div id="status"><div class="eb" id="st-eb">SEPARATING STEMS</div>
-      <div class="h" id="st-h">—</div><div class="sub" id="st-sub"></div></div>
+    <div id="status">
+      <div class="ringwrap"><svg viewBox="0 0 200 200" aria-hidden="true">
+        <g id="segtrack"></g><g id="segfill"></g></svg>
+        <div class="ringtext"><div id="pct">0<sup>%</sup></div><div id="eta"></div></div>
+      </div>
+      <div id="st-eb">PREPARING</div>
+      <div id="st-h">—</div>
+      <div id="st-sub"></div>
+      <div id="rail"></div><div id="raillabels"></div>
+      <button class="logbtn" id="logbtn" aria-expanded="false">Show log</button>
+      <pre id="log"></pre>
+    </div>
   </div>
   <footer>
-    <button id="play" disabled>▶</button>
+    <button id="play" disabled aria-label="Play">▶</button>
     <div class="np"><div class="t" id="np-t">Nothing loaded</div><div class="s" id="np-s">Pick a track</div></div>
+    <div class="seg" id="presets" role="group" aria-label="Preset">
+      <button data-p="subtle">Subtle</button><button data-p="natural">Natural</button>
+      <button data-p="default" class="on">Default</button><button data-p="wide">Wide</button>
+      <button data-p="stage">Stage</button></div>
     <a class="dl" id="dl" href="#" download>&#8595;&nbsp; FLAC</a>
     <a class="dl" id="dlm" href="#" download>&#8595;&nbsp; M4A</a>
     <div class="scrub"><div class="bar" id="bar"><div class="fill" id="fill"></div></div>
@@ -142,26 +193,41 @@ border-radius:7px;cursor:pointer}
   </footer>
 </section>
 </main>
-<audio id="au"></audio>
+<audio id="au" preload="auto"></audio>
 <script src="/static/three.min.js"></script>
 <script>
 const $=s=>document.querySelector(s);
-const preset="default";
-let curPath=null, meta={orbit:43,elev:25,ramp:20,beta:.92}, job=null;
+const SESSION="diveaudio.session", PRESET_KEY="diveaudio.preset";
+let preset="default";
+try{ preset=localStorage.getItem(PRESET_KEY)||"default"; }catch(e){}
+// meta is replaced, never accumulated: switching away from 'stage' must not
+// leave a stale vocal_path behind, or the orb keeps walking a path the audio
+// no longer takes.
+const META_DEFAULTS={orbit:43,elev:25,ramp:20,beta:.92,drift:{},vocal_path:null};
+let curPath=null, curKey=null, curName="", curDir="", meta=Object.assign({},META_DEFAULTS);
+let envData=null, rows=new Map();
 $("#lan").textContent=location.host;
+
+const post=(url,body)=>fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},
+  body:JSON.stringify(body)}).then(r=>r.json());
+const fmtTime=s=>isFinite(s)&&s>=0?Math.floor(s/60)+":"+String(Math.floor(s%60)).padStart(2,"0"):"0:00";
+const num=v=>v==null?"":Number(v).toLocaleString();
 
 /* ---------- library ---------- */
 async function load(q=""){
   const r=await (await fetch("/api/tracks?q="+encodeURIComponent(q))).json();
   $("#scope").textContent="LIBRARY · "+r.count+" TRACKS";
-  $("#list").innerHTML="";
+  const list=$("#list"); list.innerHTML=""; rows.clear();
   for(const t of r.results){
-    const d=document.createElement("div");d.className="row";
-    d.innerHTML='<div class="t"></div><div class="s"></div>';
-    d.children[0].textContent=t.name;
-    d.children[1].textContent=t.dir+" · "+(t.ext||"").toUpperCase()+(t.mb?" · "+t.mb+" MB":"");
+    const d=document.createElement("div"); d.className="row";
+    d.innerHTML='<div class="txt"><div class="t"></div><div class="s"></div></div><span class="mark"></span>';
+    const txt=d.firstChild;
+    txt.children[0].textContent=t.name;
+    txt.children[1].textContent=t.dir+" · "+(t.ext||"").toUpperCase()+(t.mb?" · "+t.mb+" MB":"");
     d.onclick=()=>pick(t,d);
-    $("#list").appendChild(d);
+    rows.set(t.path,d);
+    if(t.path===curPath) d.classList.add("active");
+    list.appendChild(d);
   }
 }
 async function upload(files){
@@ -175,9 +241,7 @@ async function upload(files){
     }catch(err){ lab.textContent="Upload failed"; }
   }
   await load($("#q").value);
-  if(last){ const rows=[...document.querySelectorAll(".row")];
-    const hit=rows.find(r=>r.children[0].textContent===last.name);
-    if(hit) hit.click(); }
+  if(last){ const hit=rows.get(last.path); if(hit) hit.click(); }
   setTimeout(()=>{$("#uplabel").textContent="＋ Upload a track"},3000);
 }
 $("#file").onchange=e=>{upload(e.target.files);e.target.value="";};
@@ -185,56 +249,332 @@ const aside=document.querySelector("aside");
 ["dragenter","dragover"].forEach(ev=>aside.addEventListener(ev,e=>{e.preventDefault();aside.classList.add("drag");}));
 ["dragleave","drop"].forEach(ev=>aside.addEventListener(ev,e=>{e.preventDefault();aside.classList.remove("drag");}));
 aside.addEventListener("drop",e=>{ if(e.dataTransfer.files.length) upload(e.dataTransfer.files); });
+function paintPresets(){
+  document.querySelectorAll("#presets button").forEach(b=>
+    b.classList.toggle("on", b.dataset.p===preset));
+}
+document.querySelectorAll("#presets button").forEach(b=>{
+  b.onclick=()=>{
+    if(b.dataset.p===preset) return;
+    preset=b.dataset.p;
+    try{ localStorage.setItem(PRESET_KEY,preset); }catch(e){}
+    paintPresets();
+    if(curPath) startRender();      // cached presets come back instantly
+  };
+});
+paintPresets();
 
 let tmr; $("#q").oninput=e=>{clearTimeout(tmr);tmr=setTimeout(()=>load(e.target.value),160)};
 
+/* ---------- the ring ----------
+   Segments are sized by each stage's measured share of the work, so the shape
+   of the ring is itself the answer to "what is taking the time". A cached run
+   has no separation segment at all, and the ring visibly redraws to say so. */
+const STAGE_COLOR={decode:"#8892A6",separate:"#6B4BFF",envelopes:"#FFEBC2",
+                   mix:"#FF9F45",convolve:"#2FE3D0",encode:"#8892A6"};
+const STAGE_SHORT={decode:"decode",separate:"separate",envelopes:"levels",
+                   mix:"mix",convolve:"hrtf",encode:"encode"};
+const CX=100,CY=100,RAD=84,GAP=0.008;
+function arcPath(a0,a1){
+  if(a1-a0<=0.0004) return "";
+  const pt=t=>{const a=(t-0.25)*2*Math.PI;return [CX+RAD*Math.cos(a),CY+RAD*Math.sin(a)];};
+  const [x0,y0]=pt(a0),[x1,y1]=pt(Math.min(a1,a0+0.9999));
+  return "M "+x0.toFixed(2)+" "+y0.toFixed(2)+" A "+RAD+" "+RAD+" 0 "+
+         ((a1-a0)>0.5?1:0)+" 1 "+x1.toFixed(2)+" "+y1.toFixed(2);
+}
+let ring={plan:[],stage:null,fracs:{},shown:{},pct:0,shownPct:0,lastWhole:-1,raf:null};
+
+function buildRing(plan){
+  ring.plan=plan||[];
+  const total=ring.plan.reduce((s,x)=>s+(x.weight||1),0)||1;
+  let at=0;
+  ring.plan.forEach(s=>{ s.a0=at; at+=(s.weight||1)/total; s.a1=at; });
+  const track=$("#segtrack"), fill=$("#segfill");
+  track.innerHTML=""; fill.innerHTML="";
+  const rail=$("#rail"), labels=$("#raillabels");
+  rail.innerHTML=""; labels.innerHTML="";
+  ring.plan.forEach(s=>{
+    const col=STAGE_COLOR[s.id]||"#8892A6";
+    const t=document.createElementNS("http://www.w3.org/2000/svg","path");
+    t.setAttribute("d",arcPath(s.a0+GAP,s.a1-GAP));
+    t.setAttribute("stroke",col); t.setAttribute("stroke-width","7");
+    t.setAttribute("fill","none"); t.setAttribute("stroke-linecap","round");
+    t.setAttribute("opacity",".14"); track.appendChild(t);
+    const f=t.cloneNode(); f.setAttribute("opacity","1"); f.setAttribute("d","");
+    f.dataset.id=s.id; fill.appendChild(f);
+    const bar=document.createElement("div");
+    bar.style.background=col; bar.style.flex=(s.weight||1)+" 1 0"; bar.dataset.id=s.id;
+    rail.appendChild(bar);
+    const lab=document.createElement("span");
+    lab.style.flex=(s.weight||1)+" 1 0"; lab.textContent=STAGE_SHORT[s.id]||s.id;
+    labels.appendChild(lab);
+  });
+  ring.shown={};
+}
+function paintRing(){
+  const fills=$("#segfill").children;
+  for(const f of fills){
+    const s=ring.plan.find(p=>p.id===f.dataset.id); if(!s) continue;
+    const want=ring.fracs[s.id]||0;
+    const cur=ring.shown[s.id]||0;
+    const now=Math.abs(want-cur)<0.002?want:cur+(want-cur)*0.14;
+    ring.shown[s.id]=now;
+    f.setAttribute("d",now<=0?"":arcPath(s.a0+GAP,s.a0+GAP+(s.a1-s.a0-2*GAP)*now));
+  }
+  ring.shownPct+= (ring.pct-ring.shownPct)*0.14;
+  // The arcs are cheap to redraw every frame; the readouts are not, so they
+  // only touch the DOM when the whole number they show actually changes.
+  const whole=Math.floor(Math.min(99.4,ring.shownPct*100));
+  if(whole!==ring.lastWhole){
+    ring.lastWhole=whole;
+    $("#pct").innerHTML=whole+"<sup>%</sup>";
+    if($("#mini").classList.contains("on")) paintMini(ring.shownPct);
+  }
+  ring.raf=requestAnimationFrame(paintRing);
+}
+function paintMini(p){
+  $("#mini").innerHTML='<svg width="15" height="15" viewBox="0 0 15 15">'+
+    '<circle cx="7.5" cy="7.5" r="6" fill="none" stroke="#1C2030" stroke-width="2.4"/>'+
+    '<circle cx="7.5" cy="7.5" r="6" fill="none" stroke="#2FE3D0" stroke-width="2.4"'+
+    ' stroke-linecap="round" stroke-dasharray="'+(2*Math.PI*6).toFixed(2)+'"'+
+    ' stroke-dashoffset="'+(2*Math.PI*6*(1-p)).toFixed(2)+'"/></svg>'+
+    '<span>'+Math.round(p*100)+'%</span>';
+}
+function startRing(){ if(!ring.raf) ring.raf=requestAnimationFrame(paintRing); }
+function stopRing(){ if(ring.raf){cancelAnimationFrame(ring.raf); ring.raf=null;} }
+
+/* what is actually being processed, in the renderer's own units */
+function detailText(stage,d){
+  d=d||{};
+  switch(stage){
+    case "decode":
+      if(d.src_sr) return num(d.src_sr)+" Hz · "+(d.channels||2)+" ch · "+fmtTime(d.seconds)+
+        (d.resampling?"  →  resampling to "+num(d.work_sr)+" Hz":"  ·  no resample needed");
+      return d.file?d.file+" · "+d.mb+" MB":"reading source";
+    case "separate":
+      return (d.model||"htdemucs")+" on "+(d.device||"mps").toUpperCase()+" · "+
+        (d.percent!=null?d.percent.toFixed(1)+"% of the model pass":"loading model")+
+        " · "+(d.stems||4)+" stems";
+    case "envelopes":
+      return "RMS envelope · "+(d.stem||"")+" ("+(d.index||d.stems||0)+"/"+(d.stems||4)+") @ "+
+        (d.rate||20)+" Hz";
+    case "mix":
+      if(d.drifting) return "amplitude drift pan · "+d.drifting;
+      if(d.xover!=null) return "crossover "+d.xover+" Hz · beta "+d.beta+" · mid channel only";
+      return "building anchor and mover";
+    case "convolve":
+      return num(d.blocks)+" / "+num(d.total)+" blocks · batch "+num(d.batch)+" · "+
+        num(d.block)+" window / "+num(d.hop)+" hop · "+num(d.taps)+"-tap HRIR @ "+
+        num(d.sr)+" Hz"+(d.positions?" · "+num(d.positions)+" positions":"")+
+        (d.rate?" · "+num(d.rate)+" blk/s":"");
+    case "encode":
+      return "FLAC "+(d.bits||24)+"-bit · "+num(d.sr)+" Hz"+(d.mb?" · "+d.mb+" MB":"");
+    default: return d.note||"";
+  }
+}
+
+function showStatus(){ $("#status").classList.add("on"); startRing(); }
+function hideStatus(){ $("#status").classList.remove("on"); $("#status").classList.remove("err");
+  stopRing(); $("#mini").classList.remove("on"); }
+function showError(head,body){
+  stopRing(); $("#status").classList.add("on","err");
+  $("#st-eb").textContent="RENDER FAILED"; $("#st-h").textContent=head;
+  $("#st-sub").textContent=""; $("#log").textContent=body||""; $("#log").classList.add("on");
+  $("#logbtn").textContent="Hide log";
+}
+$("#logbtn").onclick=()=>{ const l=$("#log"), on=l.classList.toggle("on");
+  $("#logbtn").textContent=on?"Hide log":"Show log"; $("#logbtn").setAttribute("aria-expanded",on); };
+$("#mini").onclick=()=>showStatus();
+
+function applySnapshot(j){
+  if(j.plan&&j.plan.length&&j.plan.map(s=>s.id).join()!==ring.plan.map(s=>s.id).join())
+    buildRing(j.plan);
+  const ids=ring.plan.map(s=>s.id), at=ids.indexOf(j.stage);
+  ring.plan.forEach((s,i)=>{
+    ring.fracs[s.id]= at<0 ? (ring.fracs[s.id]||0)
+                   : i<at ? 1 : i===at ? (j.frac||0) : (ring.fracs[s.id]||0);
+  });
+  ring.pct=Math.max(ring.pct, j.pct||0);
+  ring.stage=j.stage;
+  $("#st-eb").textContent=(j.label||j.stage||"").toUpperCase();
+  $("#st-eb").style.color=STAGE_COLOR[j.stage]||"#2FE3D0";
+  $("#st-h").textContent=curName;
+  $("#st-sub").textContent=detailText(j.stage,j.detail);
+  $("#eta").textContent=j.eta!=null?fmtTime(j.eta)+" left":
+    (j.elapsed!=null?fmtTime(j.elapsed)+" elapsed":"");
+  const rail=$("#rail").children;
+  for(let i=0;i<rail.length;i++){
+    rail[i].classList.toggle("done",at>=0&&i<at);
+    rail[i].classList.toggle("now",i===at);
+  }
+  if(j.log&&j.log.length) $("#log").textContent=j.log.join("\n");
+}
+
+/* ---------- picking and rendering ---------- */
+function markRow(path,cls){
+  const d=rows.get(path); if(!d) return;
+  d.classList.remove("busy","ready");
+  if(cls) d.classList.add(cls);
+}
+function rowRing(path,p){
+  const d=rows.get(path); if(!d||!d.classList.contains("busy")) return;
+  d.querySelector(".mark").innerHTML='<svg width="15" height="15" viewBox="0 0 15 15">'+
+    '<circle cx="7.5" cy="7.5" r="5.6" fill="none" stroke="#1C2030" stroke-width="2.2"/>'+
+    '<circle cx="7.5" cy="7.5" r="5.6" fill="none" stroke="#2FE3D0" stroke-width="2.2"'+
+    ' stroke-linecap="round" stroke-dasharray="'+(2*Math.PI*5.6).toFixed(2)+'"'+
+    ' stroke-dashoffset="'+(2*Math.PI*5.6*(1-p)).toFixed(2)+'"/></svg>';
+}
+
 async function pick(t,el){
+  if(t.path===curPath&&curKey){          // already loaded: never re-render
+    document.querySelectorAll(".row").forEach(r=>r.classList.remove("active"));
+    el.classList.add("active");
+    if($("#au").paused) playNow();
+    return;
+  }
   document.querySelectorAll(".row").forEach(r=>r.classList.remove("active"));
   el.classList.add("active");
-  curPath=t.path; $("#np-t").textContent=t.name; $("#np-s").textContent=t.dir;
-  await render();
+  curPath=t.path; curName=t.name; curDir=t.dir;
+  $("#np-t").textContent=t.name; $("#np-s").textContent=t.dir;
+  await startRender();
 }
 
-async function render(){
-  const au=$("#au"); au.pause(); $("#play").disabled=true;
-  $("#dl").classList.remove("on"); $("#dlm").classList.remove("on"); envData=null;
-  showStatus("SEPARATING STEMS",$("#np-t").textContent,
-    "First time on a track this runs Demucs — about 4 minutes. After that it's cached and renders take ~20 seconds.");
-  const r=await (await fetch("/api/render",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({path:curPath,preset})})).json();
-  if(r.error){ showStatus("ERROR","Could not start",r.error); return; }
-  job=r.job; poll();
-}
 let pollTimer=null;
-function poll(){
-  if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
-  const iv=pollTimer=setInterval(async()=>{
-    const j=await (await fetch("/api/job/"+job)).json();
-    if(j.stage==="done"){ clearInterval(iv); pollTimer=null; meta=Object.assign(meta,j.meta||{});
-      hideStatus(); const au=$("#au"); au.src="/api/audio/"+job; au.load();
-      $("#play").disabled=false; au.play().catch(()=>{});
-      const dl=$("#dl"); dl.href="/api/download/"+job+"?fmt=flac"; dl.classList.add("on");
-      const dm=$("#dlm"); dm.href="/api/download/"+job+"?fmt=m4a"; dm.classList.add("on");
-      envData=null;
-      fetch("/api/env/"+job).then(r=>r.ok?r.json():null)
-        .then(d=>{envData=d;}).catch(()=>{envData=null;}); }
-    else if(j.stage==="cancelled"){ clearInterval(iv); pollTimer=null; }
-    else if(j.stage==="error"){ clearInterval(iv); pollTimer=null; showStatus("ERROR","Render failed",j.error||""); }
-  },1500);
-}
-function showStatus(eb,h,s){$("#st-eb").textContent=eb;$("#st-h").textContent=h;$("#st-sub").textContent=s;$("#status").classList.add("on");}
-function hideStatus(){$("#status").classList.remove("on");}
+function stopPoll(){ if(pollTimer){clearTimeout(pollTimer);pollTimer=null;} }
 
-/* ---------- transport ---------- */
+async function startRender(){
+  stopPoll();
+  const au=$("#au"); au.pause(); au.removeAttribute("src"); au.load();
+  curKey=null; envData=null;
+  $("#play").disabled=true; $("#play").classList.remove("armed");
+  $("#dl").classList.remove("on"); $("#dlm").classList.remove("on");
+  ring={plan:[],stage:null,fracs:{},shown:{},pct:0,shownPct:0,lastWhole:-1,raf:ring.raf};
+
+  let r;
+  try{ r=await post("/api/render",{path:curPath,preset}); }
+  catch(e){ showError("Could not reach the server",String(e)); return; }
+  if(r.error){ showError("Could not start",r.error); return; }
+
+  curKey=r.job;
+  if(r.stage==="done"&&r.cached){ attach(r.job,r.meta); return; }   // instant
+  markRow(curPath,"busy");
+  buildRing([{id:"decode",weight:1}]);
+  $("#st-eb").textContent="PREPARING"; $("#st-h").textContent=curName;
+  $("#st-sub").textContent="reading source"; $("#eta").textContent="";
+  showStatus(); $("#mini").classList.add("on");
+  poll();
+}
+
+function poll(){
+  stopPoll();
+  const step=async()=>{
+    if(!curKey) return;
+    let j;
+    try{ j=await (await fetch("/api/job/"+curKey)).json(); }
+    catch(e){ pollTimer=setTimeout(step,1200); return; }
+    if(j.stage==="done"){ attach(curKey,j.meta||{}); return; }
+    if(j.stage==="error"){ markRow(curPath,null); showError("Render failed",j.error||""); return; }
+    if(j.stage==="cancelled"){ markRow(curPath,null); return; }
+    if(j.stage==="unknown"){ startRender(); return; }
+    applySnapshot(j);
+    rowRing(curPath,j.pct||0);
+    pollTimer=setTimeout(step,500);
+  };
+  step();
+}
+
+function attach(key,m){
+  stopPoll();
+  curKey=key; meta=Object.assign({},META_DEFAULTS,m||{}); paintLegend();
+  markRow(curPath,"ready");
+  hideStatus();
+  const au=$("#au");
+  au.src="/api/audio/"+key; au.load();
+  $("#play").disabled=false;
+  $("#dl").href="/api/download/"+key+"?fmt=flac"; $("#dl").classList.add("on");
+  $("#dlm").href="/api/download/"+key+"?fmt=m4a"; $("#dlm").classList.add("on");
+  envData=null;
+  fetch("/api/env/"+key).then(r=>r.ok?r.json():null)
+    .then(d=>{envData=d;}).catch(()=>{envData=null;});
+  try{ localStorage.setItem(SESSION,JSON.stringify(
+    {path:curPath,name:curName,dir:$("#np-s").textContent,key:key})); }catch(e){}
+  playNow();
+}
+
+/* ---------- audio output ----------
+   Safari starts an AudioContext suspended unless it is created inside a user
+   gesture, and createMediaElementSource permanently reroutes the element into
+   that context. Doing both off a programmatic play() left the element feeding a
+   dead graph: controls moved, no sound, and no way back. So the graph is only
+   ever built from a real gesture, and only once the context is confirmed
+   running -- otherwise the element keeps its native output untouched. The
+   visualiser does not need it: per-stem levels come from the server. */
 const au=$("#au");
-$("#play").onclick=()=>au.paused?au.play():au.pause();
-au.onplay=()=>$("#play").textContent="❚❚"; au.onpause=()=>$("#play").textContent="▶";
-const fmt=s=>isFinite(s)?Math.floor(s/60)+":"+String(Math.floor(s%60)).padStart(2,"0"):"0:00";
+let actx=null, analyser=null, freqBuf=null, wired=false;
+
+async function wireAnalyser(){
+  if(wired||actx===false) return wired;
+  try{
+    const C=window.AudioContext||window.webkitAudioContext;
+    if(!C){ actx=false; return false; }
+    const ctx=new C();
+    if(ctx.state==="suspended"){ try{ await ctx.resume(); }catch(e){} }
+    if(ctx.state!=="running"){ try{ ctx.close(); }catch(e){} return false; }
+    const src=ctx.createMediaElementSource(au);
+    analyser=ctx.createAnalyser(); analyser.fftSize=512;
+    src.connect(analyser); analyser.connect(ctx.destination);
+    freqBuf=new Uint8Array(analyser.frequencyBinCount);
+    actx=ctx; wired=true;
+  }catch(e){ actx=false; analyser=null; freqBuf=null; }
+  return wired;
+}
+function armPlay(){ $("#play").classList.add("armed"); $("#np-s").textContent="Ready — press play"; }
+function disarm(){ $("#play").classList.remove("armed"); $("#np-s").textContent=curDir; }
+async function playNow(){
+  try{ await au.play(); disarm(); }
+  catch(e){ armPlay(); }          // blocked without a gesture; say so plainly
+}
+$("#play").onclick=async()=>{
+  if(au.paused){
+    await wireAnalyser();         // inside the gesture, where Safari allows it
+    if(actx&&actx.state==="suspended"){ try{ await actx.resume(); }catch(e){} }
+    try{ await au.play(); disarm(); }catch(e){ armPlay(); }
+  } else au.pause();
+};
+au.onplay=()=>{$("#play").textContent="❚❚"; $("#play").setAttribute("aria-label","Pause");};
+au.onpause=()=>{$("#play").textContent="▶"; $("#play").setAttribute("aria-label","Play");};
 au.ontimeupdate=()=>{ if(!au.duration)return;
   $("#fill").style.width=(au.currentTime/au.duration*100)+"%";
-  $("#t-el").textContent=fmt(au.currentTime); $("#t-re").textContent="−"+fmt(au.duration-au.currentTime); };
+  $("#t-el").textContent=fmtTime(au.currentTime);
+  $("#t-re").textContent="−"+fmtTime(au.duration-au.currentTime); };
 $("#bar").onclick=e=>{ if(au.duration){const r=e.currentTarget.getBoundingClientRect();
   au.currentTime=(e.clientX-r.left)/r.width*au.duration;} };
+document.addEventListener("keydown",e=>{
+  if(e.code==="Space"&&e.target.tagName!=="INPUT"){ e.preventDefault(); $("#play").click(); }});
+
+/* ---------- session restore ----------
+   Resolving asks whether a render already exists; it never starts one, so
+   reloading the page can not kick off a four-minute job by itself. */
+async function boot(){
+  await load();
+  let s=null;
+  try{ s=JSON.parse(localStorage.getItem(SESSION)||"null"); }catch(e){}
+  if(!s||!s.path) return;
+  let r;
+  try{ r=await post("/api/resolve",{path:s.path,preset}); }catch(e){ return; }
+  if(!r||!r.cached) return;
+  curPath=s.path; curName=s.name||""; curDir=s.dir||"";
+  $("#np-t").textContent=s.name||""; $("#np-s").textContent=s.dir||"";
+  const d=rows.get(s.path); if(d) d.classList.add("active");
+  curKey=r.key; meta=Object.assign({},META_DEFAULTS,r.meta||{}); paintLegend();
+  markRow(curPath,"ready");
+  const a=$("#au"); a.src="/api/audio/"+r.key; a.load();
+  $("#play").disabled=false;
+  $("#dl").href="/api/download/"+r.key+"?fmt=flac"; $("#dl").classList.add("on");
+  $("#dlm").href="/api/download/"+r.key+"?fmt=m4a"; $("#dlm").classList.add("on");
+  fetch("/api/env/"+r.key).then(x=>x.ok?x.json():null).then(x=>{envData=x;}).catch(()=>{});
+  armPlay();                      // restored, not autoplayed: the user decides
+}
 
 /* ---------- 3D room ---------- */
 const view=$("#view");
@@ -253,6 +593,14 @@ const WALLS=[
   {n:"floor", p:[0,-RH,0], q:[-Math.PI/2,0,0], w:RW*2, h:RD*2},
   {n:"ceil",  p:[0, RH,0], q:[ Math.PI/2,0,0], w:RW*2, h:RD*2}
 ];
+/* Each wall lies on one axis at one coordinate; derive that once so distance,
+   mirroring and clipping all read from the same source of truth. */
+WALLS.forEach(W=>{ W.ax=W.p.findIndex(v=>v!==0); W.v=W.p[W.ax]; });
+const AXIS=["x","y","z"];
+function wallDist(W,p){ return Math.abs(W.v - p[AXIS[W.ax]]); }
+const _img=new THREE.Vector3();
+function imagePos(W,p){ _img.copy(p); _img[AXIS[W.ax]]=2*W.v - p[AXIS[W.ax]]; return _img; }
+
 const wallMeshes=WALLS.map(W=>{
   const m=new THREE.Mesh(new THREE.PlaneGeometry(W.w,W.h),
     new THREE.MeshBasicMaterial({color:0x2FE3D0,transparent:true,opacity:.02,
@@ -300,6 +648,29 @@ SRC.forEach(s=>{ s.waves=[];
     scene.add(m); s.waves.push(m);
   }});
 
+/* reflections, by the image-source method: a reflection off a wall is a virtual
+   source mirrored across that wall, so the reflected front is a sphere expanding
+   from the mirror point on the same clock as the direct front. It becomes real
+   only once the direct front has actually reached the wall, which is what makes
+   the wall flash and the reflection appear in the right order. A clipping plane
+   at the wall keeps the half outside the room hidden, so the front reads as
+   emanating inward off the surface. */
+ren.localClippingEnabled=true;
+const REFL_OPACITY=0.075, REFL_DECAY=0.24;
+WALLS.forEach(W=>{
+  const n=new THREE.Vector3(); n[AXIS[W.ax]]=-Math.sign(W.v);
+  W.clip=new THREE.Plane(n,Math.abs(W.v));
+});
+const reflGeo=new THREE.SphereGeometry(1,12,8);
+SRC.forEach(s=>{
+  s.refl=WALLS.map(W=>{
+    const m=new THREE.Mesh(reflGeo,new THREE.MeshBasicMaterial({color:s.col,
+      wireframe:true,transparent:true,opacity:0,depthWrite:false,
+      clippingPlanes:[W.clip]}));
+    m.visible=false; scene.add(m); return m;
+  });
+});
+
 /* mover trail */
 const TN=90, trailGeo=new THREE.BufferGeometry();
 trailGeo.setAttribute("position",new THREE.BufferAttribute(new Float32Array(TN*3),3));
@@ -313,16 +684,38 @@ elevGeo.setAttribute("position",new THREE.BufferAttribute(new Float32Array(6),3)
 scene.add(new THREE.Line(elevGeo,new THREE.LineBasicMaterial(
   {color:0x2FE3D0,transparent:true,opacity:.3})));
 
-/* trajectory - must match spatialize_cli.py exactly */
+/* trajectory - must match spatialize_cli.py exactly.
+
+   Axis mapping, verified against the SADIE HRIR data rather than assumed:
+   SOFA is right-handed with +x forward, +y LEFT, +z up, and a measurement at
+   azimuth +90 deg is measurably louder and 22 samples earlier in receiver 0
+   (the left ear). three.js here is +x screen-right, +y up, -z forward.
+   So the SOFA y component (left) must map to NEGATIVE three.js x. It did not,
+   and every HRTF-rendered position was drawn mirrored: the orb sat on the
+   right while the sound came from the left. */
 const R=4.1;
+function sphericalToRoom(azDeg,elDeg,rad){
+  const az=azDeg*Math.PI/180, el=elDeg*Math.PI/180;
+  return new THREE.Vector3(-rad*Math.cos(el)*Math.sin(az), rad*Math.sin(el),
+                           -rad*Math.cos(el)*Math.cos(az));
+}
 function posAt(t){
   const s=(meta.orbit||43)/50, TAU=2*Math.PI;
   const azd=180*(0.55*Math.sin(TAU*t/(97*s))+0.30*Math.sin(TAU*t/(61*s)+1.7)
                 +0.15*Math.sin(TAU*t/(37*s)+4.1));
   const eld=(meta.elev||25)*1.2*(0.60*Math.sin(TAU*t/(71*s)+0.8)
                                 +0.40*Math.sin(TAU*t/(43*s)+2.9));
-  const az=azd*Math.PI/180, el=eld*Math.PI/180;
-  return new THREE.Vector3(R*Math.cos(el)*Math.sin(az),R*Math.sin(el),-R*Math.cos(el)*Math.cos(az));
+  return sphericalToRoom(azd,eld,R);
+}
+/* the vocalist's path - must match dsp.stage_path() exactly. Bounded to the
+   front arc, and drawn nearer than the wanderer because a singer is on a stage
+   in front of you, not circling the room. */
+function stagePosAt(t){
+  const vp=meta.vocal_path, TAU=2*Math.PI;
+  const azd=vp.arc*(0.58*Math.sin(TAU*t/41)+0.30*Math.sin(TAU*t/27+2.2)
+                   +0.12*Math.sin(TAU*t/19+5.0));
+  const eld=vp.elev*(0.60*Math.sin(TAU*t/33+1.1)+0.40*Math.sin(TAU*t/23+3.7));
+  return sphericalToRoom(azd,eld,R*0.72);
 }
 
 /* drag to spin, wheel/pinch to zoom */
@@ -359,20 +752,9 @@ function resize(){
 }
 new ResizeObserver(resize).observe(view);
 
-/* live level from the actual audio */
-let analyser=null,freqBuf=null;
-function initAnalyser(){
-  if(analyser) return;
-  try{
-    const ctx=new (window.AudioContext||window.webkitAudioContext)();
-    const src=ctx.createMediaElementSource($("#au"));
-    analyser=ctx.createAnalyser(); analyser.fftSize=512;
-    src.connect(analyser); analyser.connect(ctx.destination);
-    freqBuf=new Uint8Array(analyser.frequencyBinCount);
-    if(ctx.state==="suspended") ctx.resume();
-  }catch(e){ analyser=null; }
-}
-$("#au").addEventListener("play",initAnalyser);
+/* live level from the actual audio -- only available when the analyser could be
+   wired without breaking output. stemLevel() prefers the server's per-stem
+   envelopes anyway, so this is a fallback, not a requirement. */
 function level(lo,hi){
   if(!analyser) return .35;
   analyser.getByteFrequencyData(freqBuf);
@@ -382,7 +764,6 @@ function level(lo,hi){
 }
 
 const BAND={bass:[0,.06], drums:[.06,.22], vocals:[.05,.3], other:[.22,.9]};
-let envData=null;
 /* true per-stem level from the server's RMS envelopes; falls back to
    frequency bands of the mixed audio if they are not available */
 function stemLevel(k,t){
@@ -398,6 +779,7 @@ function tick(){
 
   SRC.forEach((s,si)=>{
     if(s.moves) s.pos.copy(posAt(t));
+    else if(s.k==="vocals" && meta.vocal_path) s.pos.copy(stagePosAt(t));
     else s.pos.set(s.base.x + driftX(s.k,t), s.base.y, s.base.z);
     s.g.position.copy(s.pos);
     const target=stemLevel(s.k,t);
@@ -412,12 +794,23 @@ function tick(){
       m.position.copy(s.pos); m.scale.setScalar(Math.max(.001,r));
       m.material.opacity=Math.max(0,.19*(1-ph)*(0.35+lv));
       WALLS.forEach((W,wi)=>{
-        const d=Math.abs(W.n==="right"?RW-s.pos.x : W.n==="left"?s.pos.x+RW :
-                         W.n==="front"?s.pos.z+RD : W.n==="back"?RD-s.pos.z :
-                         W.n==="floor"?s.pos.y+RH : RH-s.pos.y);
+        const d=wallDist(W,s.pos);
         if(Math.abs(r-d)<0.55) wallHit[wi]=Math.max(wallHit[wi],(1-Math.abs(r-d)/0.55)*(0.3+lv));
       });
     }
+
+    // One reflection per wall, tied to the leading front, so the picture stays
+    // legible: six extra spheres per source rather than eighteen.
+    const ph0=((t/WPER)+si*.17)%1, r0=ph0*WMAX;
+    WALLS.forEach((W,wi)=>{
+      const m=s.refl[wi], d=wallDist(W,s.pos);
+      if(r0<d){ m.visible=false; return; }        // the front has not arrived yet
+      m.visible=true;
+      m.position.copy(imagePos(W,s.pos));
+      m.scale.setScalar(Math.max(.001,r0));
+      m.material.opacity=Math.max(0,REFL_OPACITY*(1-ph0)*(0.3+lv)*
+                                    Math.exp(-(r0-d)*REFL_DECAY));
+    });
   });
   wallMeshes.forEach((m,i)=>{ m.material.opacity=.02+wallHit[i]*.20; });
 
@@ -434,9 +827,14 @@ function tick(){
 
   ren.render(scene,cam); requestAnimationFrame(tick);
 }
-$("#legend").innerHTML=[["#6B4BFF","bass"],["#FF9F45","drums"],
-  ["#FFEBC2","vocals"],["#2FE3D0","other — moving"]]
-  .map(([c,l])=>'<div><i style="background:'+c+'"></i>'+l+'</div>').join("")
-  +'<div style="opacity:.55">drag to spin · scroll to zoom</div>';
-resize(); tick(); load();
+function paintLegend(){
+  const walking=!!meta.vocal_path;
+  $("#legend").innerHTML=[["#6B4BFF","bass — fixed"],["#FF9F45","drums — drifts"],
+    ["#FFEBC2", walking?"vocals — walking the stage":"vocals — drifts"],
+    ["#2FE3D0","other — wandering"]]
+    .map(([c,l])=>'<div><i style="background:'+c+'"></i>'+l+'</div>').join("")
+    +'<div style="opacity:.55">drag to spin · scroll to zoom</div>';
+}
+paintLegend();
+resize(); tick(); boot();
 </script></body></html>

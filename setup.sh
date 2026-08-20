@@ -7,7 +7,8 @@ export PATH="$HOME/.local/bin:$PATH"
 
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python \
-  demucs soundfile numpy scipy sofar fastapi "uvicorn[standard]" python-multipart
+  demucs soundfile numpy scipy sofar fastapi "uvicorn[standard]" python-multipart \
+  pytest
 
 mkdir -p static
 [ -f static/three.min.js ] || \
