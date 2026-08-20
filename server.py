@@ -141,6 +141,14 @@ def audio(jid: str):
         return JSONResponse({"error": "not ready"}, status_code=409)
     return FileResponse(j["file"], media_type="audio/flac")
 
+@app.get("/api/download/{jid}")
+def download(jid: str):
+    j = jobs.get(jid) or {}
+    if j.get("stage") != "done":
+        return JSONResponse({"error": "not ready"}, status_code=409)
+    name = Path(j.get("path", "track")).stem + " (binaural).flac"
+    return FileResponse(j["file"], media_type="audio/flac", filename=name)
+
 @app.get("/")
 def root():
     return FileResponse(HERE / "static/index.html")
