@@ -180,3 +180,34 @@ def test_render_failure_is_surfaced_with_output(app, tmp_path, monkeypatch):
     done = wait_done(client, key)
     assert done["stage"] == "error"
     assert "boom" in done["error"]
+
+
+# ---------------------------------------------------------------- Off mode --
+def test_source_serves_a_library_file(app):
+    """'Off' plays the original file, so it has to be reachable."""
+    client, _, song, _, _ = app
+    client.post("/api/reindex")
+    r = client.get("/api/source", params={"path": song})
+    assert r.status_code == 200
+
+
+def test_source_refuses_a_file_outside_the_library(app, tmp_path):
+    """The server binds 0.0.0.0 with no auth; a path parameter must not be a
+    way to read arbitrary files off the machine."""
+    client, _, _, _, _ = app
+    client.post("/api/reindex")
+    secret = tmp_path / "id_rsa"
+    secret.write_text("PRIVATE KEY")
+    assert client.get("/api/source", params={"path": str(secret)}).status_code == 403
+
+
+def test_source_refuses_a_traversal(app):
+    client, _, song, _, _ = app
+    client.post("/api/reindex")
+    r = client.get("/api/source", params={"path": song + "/../../../../etc/passwd"})
+    assert r.status_code in (403, 404)
+
+
+def test_source_refuses_a_missing_file(app):
+    client, _, _, _, _ = app
+    assert client.get("/api/source", params={"path": "/nope/none.flac"}).status_code == 404

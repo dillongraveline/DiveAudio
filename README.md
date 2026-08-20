@@ -110,10 +110,28 @@ centre.
 Only the 🟢 layer is HRTF-convolved by default. Everything else is either fixed or
 moved by level alone, which is why the master survives intact underneath.
 
-### The `stage` preset
+### Three modes
 
-This is what the app renders. The other presets remain available from the CLI
-via `--preset`, and each caches independently.
+The app offers three, and switching between them **never interrupts playback**:
+the outgoing stream keeps playing while the incoming one loads and seeks to the
+same timestamp, and only once it can actually play do the two cross-fade. That
+holds even when the target still has to be rendered — you keep listening to what
+you had until the moment the new one is ready.
+
+| mode | what you hear | render |
+|---|---|---|
+| **Off** | your original file, untouched | none — instant |
+| **Enhanced** | the `default` preset | one HRTF mover |
+| **Stage Simulator** | `stage`: the vocal walks a stage too | two HRTF movers |
+
+`Off` is the honest baseline for an A/B, and because nothing is being steered the
+3D view holds still rather than animating motion the audio does not contain. The
+download button always gives you whatever is currently selected. `subtle`,
+`natural` and `wide` remain available from the CLI via `--preset`.
+
+The endpoint serving your untouched files will only serve paths that are already
+in the library index — the server binds `0.0.0.0` with no authentication, so a
+path parameter must never become a way to read arbitrary files off the machine.
 
 `stage` additionally HRTF-renders the vocal's directional mid, on a **bounded
 front arc** rather than the free wander — a singer works a stage in front of you,

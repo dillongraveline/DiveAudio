@@ -95,6 +95,13 @@ border:1px solid var(--border);background:#141826;color:var(--txt);font-size:11.
 text-decoration:none;cursor:pointer;white-space:nowrap;flex:0 0 auto}
 .dl.on{display:inline-flex}
 .dl:hover{border-color:var(--mover);color:var(--mover)}
+.seg{display:flex;background:#141826;border:1px solid var(--border);border-radius:9px;
+padding:3px;flex:0 0 auto}
+.seg button{background:none;border:0;color:var(--muted);font:11.5px Inter,sans-serif;
+padding:6px 13px;border-radius:7px;cursor:pointer;white-space:nowrap}
+.seg button:hover{color:var(--txt)}
+.seg button.on{background:#22304A;color:var(--mover);font-weight:600}
+.seg button.pending{color:var(--mover);opacity:.75}
 /* a compact ring in the header keeps the job visible if the overlay is dismissed */
 #mini{display:none;align-items:center;gap:7px;font-variant-numeric:tabular-nums;cursor:pointer}
 #mini.on{display:flex}
@@ -137,7 +144,9 @@ text-decoration:none;cursor:pointer;white-space:nowrap;flex:0 0 auto}
   #play{order:1;width:44px;height:44px;font-size:16px}
   .dl{order:3;height:38px;padding:0 12px;font-size:11px}
   .np{order:2;width:auto;flex:1 1 0;min-width:0}
-  .scrub{order:4;flex:1 1 100%}
+  .seg{order:4;flex:1 1 100%;justify-content:space-between}
+  .seg button{flex:1 1 0;padding:10px 4px;font-size:11.5px}
+  .scrub{order:5;flex:1 1 100%}
   .bar{height:6px}
   .times{margin-top:6px}
 }
@@ -147,6 +156,8 @@ text-decoration:none;cursor:pointer;white-space:nowrap;flex:0 0 auto}
   section{order:1;min-height:0}
   #legend{position:absolute;top:auto;bottom:6px;background:none;padding:0 0 0 12px}
   footer{flex-wrap:nowrap}
+  .seg{flex:0 0 auto;order:2}
+  .seg button{padding:8px 9px;font-size:11px}
   .scrub{flex:1 1 auto;order:3}
   .ringwrap{width:112px;height:112px}
   #pct{font-size:24px}
@@ -182,6 +193,9 @@ text-decoration:none;cursor:pointer;white-space:nowrap;flex:0 0 auto}
   <footer>
     <button id="play" disabled aria-label="Play">▶</button>
     <div class="np"><div class="t" id="np-t">Nothing loaded</div><div class="s" id="np-s">Pick a track</div></div>
+    <div class="seg" id="modes" role="group" aria-label="Spatialisation mode">
+      <button data-m="off">Off</button><button data-m="enhanced">Enhanced</button
+      ><button data-m="stage">Stage Simulator</button></div>
     <a class="dl" id="dl" href="#" download>&#8595;&nbsp; FLAC</a>
     <a class="dl" id="dlm" href="#" download>&#8595;&nbsp; M4A</a>
     <div class="scrub"><div class="bar" id="bar"><div class="fill" id="fill"></div></div>
@@ -189,13 +203,21 @@ text-decoration:none;cursor:pointer;white-space:nowrap;flex:0 0 auto}
   </footer>
 </section>
 </main>
-<audio id="au" preload="auto"></audio>
+<audio id="auA" preload="auto"></audio>
+<audio id="auB" preload="auto"></audio>
 <script src="/static/three.min.js"></script>
 <script>
 const $=s=>document.querySelector(s);
-const SESSION="diveaudio.session";
-// One preset. The others remain available from the CLI via --preset.
-const preset="stage";
+const SESSION="diveaudio.session", MODE_KEY="diveaudio.mode";
+/* Three modes. 'Off' is the untouched file, which needs no render at all and is
+   the honest baseline for an A/B; the other two are presets of the renderer. */
+const MODES=[{id:"off",   label:"Off"},
+             {id:"enhanced", label:"Enhanced",       preset:"default"},
+             {id:"stage",    label:"Stage Simulator", preset:"stage"}];
+const modeOf=id=>MODES.find(m=>m.id===id)||MODES[1];
+let mode="enhanced";
+try{ mode=localStorage.getItem(MODE_KEY)||"enhanced"; }catch(e){}
+if(!MODES.some(m=>m.id===mode)) mode="enhanced";
 // meta is replaced, never accumulated: switching away from 'stage' must not
 // leave a stale vocal_path behind, or the orb keeps walking a path the audio
 // no longer takes.
@@ -406,57 +428,147 @@ function rowRing(path,p){
     ' stroke-dashoffset="'+(2*Math.PI*5.6*(1-p)).toFixed(2)+'"/></svg>';
 }
 
-async function pick(t,el){
-  if(t.path===curPath&&curKey){          // already loaded: never re-render
-    document.querySelectorAll(".row").forEach(r=>r.classList.remove("active"));
-    el.classList.add("active");
-    if($("#au").paused) playNow();
-    return;
-  }
-  document.querySelectorAll(".row").forEach(r=>r.classList.remove("active"));
-  el.classList.add("active");
-  curPath=t.path; curName=t.name; curDir=t.dir;
-  $("#np-t").textContent=t.name; $("#np-s").textContent=t.dir;
-  await startRender();
+/* ---------- two players, so a mode change never stops the music ----------
+   Switching src on a single element tears down its buffer and restarts it. So
+   the outgoing stream keeps playing while the incoming one loads and seeks to
+   the same timestamp; only once it can actually play do the two cross-fade.
+   That holds even when the target has to be rendered first, which can take
+   minutes -- you keep listening to what you had until the moment it is ready. */
+const auA=$("#auA"), auB=$("#auB");
+let cur=auA, swapping=false;
+const idle=()=>cur===auA?auB:auA;
+const XFADE=140;
+
+function once(el,ev,ms){
+  return new Promise(res=>{
+    let done=false;
+    const fire=ok=>{ if(done) return; done=true; el.removeEventListener(ev,hit); res(ok); };
+    const hit=()=>fire(true);
+    el.addEventListener(ev,hit);
+    if(ms) setTimeout(()=>fire(false),ms);
+  });
 }
 
-let pollTimer=null;
-function stopPoll(){ if(pollTimer){clearTimeout(pollTimer);pollTimer=null;} }
+async function swapTo(url){
+  const from=cur, to=idle();
+  const at=isFinite(from.currentTime)?from.currentTime:0;
+  const playing=!from.paused && !from.ended;
+  swapping=true;
+  try{
+    to.pause();
+    if(to.getAttribute("src")!==url){ to.setAttribute("src",url); to.load(); }
+    if(to.readyState<1) await once(to,"loadedmetadata",20000);
+    if(at>0 && isFinite(to.duration)){
+      try{ to.currentTime=Math.min(at,to.duration-0.05); }catch(e){}
+      if(to.readyState<3) await once(to,"seeked",8000);
+    }
+    if(playing){
+      if(to.readyState<3) await once(to,"canplay",30000);
+      to.volume=0;
+      try{ await to.play(); }catch(e){ swapping=false; cur=to; armPlay(); return; }
+      const t0=performance.now();
+      await new Promise(res=>{
+        const step=()=>{
+          const k=Math.min(1,(performance.now()-t0)/XFADE);
+          to.volume=k; from.volume=1-k;
+          if(k<1) requestAnimationFrame(step); else res();
+        };
+        step();
+      });
+      from.pause();
+    }
+    from.volume=1; to.volume=1;
+    from.removeAttribute("src"); from.load();   // release the old buffer
+    cur=to;
+  } finally { swapping=false; }
+  paintTimes();
+  if(!cur.paused) disarm();
+}
 
-async function startRender(){
+/* ---------- modes ---------- */
+function paintModes(pending){
+  document.querySelectorAll("#modes button").forEach(b=>{
+    b.classList.toggle("on", b.dataset.m===mode);
+    b.classList.toggle("pending", b.dataset.m===pending);
+  });
+}
+function paintDownloads(){
+  const dl=$("#dl"), dm=$("#dlm");
+  if(mode==="off"){
+    dl.href="/api/source?path="+encodeURIComponent(curPath||"");
+    dl.innerHTML="&#8595;&nbsp; Original";
+    dl.classList.toggle("on",!!curPath);
+    dm.classList.remove("on");                 // nothing has been transcoded
+  }else{
+    dl.innerHTML="&#8595;&nbsp; FLAC";
+    dl.href=curKey?"/api/download/"+curKey+"?fmt=flac":"#";
+    dm.href=curKey?"/api/download/"+curKey+"?fmt=m4a":"#";
+    dl.classList.toggle("on",!!curKey);
+    dm.classList.toggle("on",!!curKey);
+  }
+}
+function saveSession(){
+  try{ localStorage.setItem(SESSION,JSON.stringify(
+    {path:curPath,name:curName,dir:curDir,mode:mode})); }catch(e){}
+}
+
+document.querySelectorAll("#modes button").forEach(b=>{
+  b.onclick=()=>{
+    if(b.dataset.m===mode) return;
+    mode=b.dataset.m;
+    try{ localStorage.setItem(MODE_KEY,mode); }catch(e){}
+    paintModes();
+    saveSession();
+    if(curPath) applyMode();
+  };
+});
+
+async function applyMode(){
+  const m=modeOf(mode);
   stopPoll();
-  const au=$("#au"); au.pause(); au.removeAttribute("src"); au.load();
-  curKey=null; envData=null;
-  $("#play").disabled=true; $("#play").classList.remove("armed");
-  $("#dl").classList.remove("on"); $("#dlm").classList.remove("on");
-  ring={plan:[],stage:null,fracs:{},shown:{},pct:0,shownPct:0,lastWhole:-1,raf:ring.raf};
-
+  if(m.id==="off"){
+    hideStatus(); markRow(curPath,null);
+    curKey=null; envData=null;
+    meta=Object.assign({},META_DEFAULTS);
+    paintLegend(); paintDownloads();
+    $("#play").disabled=false;
+    await swapTo("/api/source?path="+encodeURIComponent(curPath));
+    if(cur.paused && !cur.getAttribute("src")) return;
+    if(cur.paused) playNow();
+    return;
+  }
   let r;
-  try{ r=await post("/api/render",{path:curPath,preset}); }
+  try{ r=await post("/api/render",{path:curPath,preset:m.preset}); }
   catch(e){ showError("Could not reach the server",String(e)); return; }
   if(r.error){ showError("Could not start",r.error); return; }
-
-  curKey=r.job;
-  if(r.stage==="done"&&r.cached){ attach(r.job,r.meta); return; }   // instant
+  curKeyPending=r.job;
+  if(r.stage==="done"&&r.cached){ await adopt(r.job,r.meta); return; }
+  // Not cached: keep whatever is playing and report progress. Only cover the
+  // view if there is nothing to listen to in the meantime.
   markRow(curPath,"busy");
+  paintModes(mode);
   buildRing([{id:"decode",weight:1}]);
   $("#st-eb").textContent="PREPARING"; $("#st-h").textContent=curName;
   $("#st-sub").textContent="reading source"; $("#eta").textContent="";
-  showStatus(); $("#mini").classList.add("on");
-  poll();
+  if(cur.paused) showStatus();
+  $("#mini").classList.add("on");
+  poll(r.job);
 }
 
-function poll(){
+let curKeyPending=null, pollTimer=null;
+function stopPoll(){ if(pollTimer){clearTimeout(pollTimer);pollTimer=null;} }
+
+function poll(key){
   stopPoll();
   const step=async()=>{
-    if(!curKey) return;
+    if(curKeyPending!==key) return;              // a newer request superseded it
     let j;
-    try{ j=await (await fetch("/api/job/"+curKey)).json(); }
+    try{ j=await (await fetch("/api/job/"+key)).json(); }
     catch(e){ pollTimer=setTimeout(step,1200); return; }
-    if(j.stage==="done"){ attach(curKey,j.meta||{}); return; }
-    if(j.stage==="error"){ markRow(curPath,null); showError("Render failed",j.error||""); return; }
-    if(j.stage==="cancelled"){ markRow(curPath,null); return; }
-    if(j.stage==="unknown"){ startRender(); return; }
+    if(j.stage==="done"){ await adopt(key,j.meta||{}); return; }
+    if(j.stage==="error"){ markRow(curPath,null); paintModes(); showError("Render failed",j.error||""); return; }
+    if(j.stage==="cancelled"){ markRow(curPath,null); paintModes(); return; }
+    if(j.stage==="unknown"){ applyMode(); return; }
     applySnapshot(j);
     rowRing(curPath,j.pct||0);
     pollTimer=setTimeout(step,500);
@@ -464,22 +576,34 @@ function poll(){
   step();
 }
 
-function attach(key,m){
+async function adopt(key,m){
   stopPoll();
-  curKey=key; meta=Object.assign({},META_DEFAULTS,m||{}); paintLegend();
-  markRow(curPath,"ready");
-  hideStatus();
-  const au=$("#au");
-  au.src="/api/audio/"+key; au.load();
+  curKey=key; curKeyPending=null;
+  meta=Object.assign({},META_DEFAULTS,m||{});
+  markRow(curPath,"ready"); paintLegend(); paintModes(); hideStatus();
+  $("#mini").classList.remove("on");
   $("#play").disabled=false;
-  $("#dl").href="/api/download/"+key+"?fmt=flac"; $("#dl").classList.add("on");
-  $("#dlm").href="/api/download/"+key+"?fmt=m4a"; $("#dlm").classList.add("on");
+  paintDownloads(); saveSession();
   envData=null;
   fetch("/api/env/"+key).then(r=>r.ok?r.json():null)
     .then(d=>{envData=d;}).catch(()=>{envData=null;});
-  try{ localStorage.setItem(SESSION,JSON.stringify(
-    {path:curPath,name:curName,dir:$("#np-s").textContent,key:key})); }catch(e){}
-  playNow();
+  await swapTo("/api/audio/"+key);
+  if(cur.paused) playNow();
+}
+
+async function pick(t,el){
+  document.querySelectorAll(".row").forEach(r=>r.classList.remove("active"));
+  el.classList.add("active");
+  if(t.path===curPath){ if(cur.paused) playNow(); return; }   // never re-render
+  curPath=t.path; curName=t.name; curDir=t.dir;
+  $("#np-t").textContent=t.name; $("#np-s").textContent=t.dir;
+  stopPoll(); curKey=null; curKeyPending=null; envData=null;
+  swapping=true;
+  [auA,auB].forEach(e=>{ e.pause(); e.removeAttribute("src"); e.load(); e.volume=1; });
+  swapping=false;
+  $("#play").disabled=true; $("#play").classList.remove("armed");
+  $("#dl").classList.remove("on"); $("#dlm").classList.remove("on");
+  await applyMode();
 }
 
 /* ---------- audio output ----------
@@ -488,73 +612,99 @@ function attach(key,m){
    that context. Doing both off a programmatic play() left the element feeding a
    dead graph: controls moved, no sound, and no way back. So the graph is only
    ever built from a real gesture, and only once the context is confirmed
-   running -- otherwise the element keeps its native output untouched. The
+   running -- otherwise the elements keep their native output untouched. The
    visualiser does not need it: per-stem levels come from the server. */
-const au=$("#au");
-let actx=null, analyser=null, freqBuf=null, wired=false;
+let actx=null, analyser=null, freqBuf=null;
+const wiredEls=new Set();
 
-async function wireAnalyser(){
-  if(wired||actx===false) return wired;
+async function wireAudio(){
+  if(actx===false) return false;
   try{
-    const C=window.AudioContext||window.webkitAudioContext;
-    if(!C){ actx=false; return false; }
-    const ctx=new C();
-    if(ctx.state==="suspended"){ try{ await ctx.resume(); }catch(e){} }
-    if(ctx.state!=="running"){ try{ ctx.close(); }catch(e){} return false; }
-    const src=ctx.createMediaElementSource(au);
-    analyser=ctx.createAnalyser(); analyser.fftSize=512;
-    src.connect(analyser); analyser.connect(ctx.destination);
-    freqBuf=new Uint8Array(analyser.frequencyBinCount);
-    actx=ctx; wired=true;
-  }catch(e){ actx=false; analyser=null; freqBuf=null; }
-  return wired;
+    if(!actx){
+      const C=window.AudioContext||window.webkitAudioContext;
+      if(!C){ actx=false; return false; }
+      const ctx=new C();
+      if(ctx.state==="suspended"){ try{ await ctx.resume(); }catch(e){} }
+      if(ctx.state!=="running"){ try{ ctx.close(); }catch(e){} return false; }
+      analyser=ctx.createAnalyser(); analyser.fftSize=512;
+      analyser.connect(ctx.destination);
+      freqBuf=new Uint8Array(analyser.frequencyBinCount);
+      actx=ctx;
+    }
+    if(actx.state==="suspended"){ try{ await actx.resume(); }catch(e){} }
+    // Both elements must join the graph, or the one that is not routed would
+    // keep playing straight to the speakers and the cross-fade would double up.
+    for(const el of [auA,auB]){
+      if(wiredEls.has(el)) continue;
+      try{ actx.createMediaElementSource(el).connect(analyser); wiredEls.add(el); }
+      catch(e){ /* already bound, or refused: it keeps its native output */ }
+    }
+    return true;
+  }catch(e){ actx=false; analyser=null; freqBuf=null; return false; }
 }
+
 function armPlay(){ $("#play").classList.add("armed"); $("#np-s").textContent="Ready — press play"; }
 function disarm(){ $("#play").classList.remove("armed"); $("#np-s").textContent=curDir; }
 async function playNow(){
-  try{ await au.play(); disarm(); }
+  try{ await cur.play(); disarm(); }
   catch(e){ armPlay(); }          // blocked without a gesture; say so plainly
 }
 $("#play").onclick=async()=>{
-  if(au.paused){
-    await wireAnalyser();         // inside the gesture, where Safari allows it
-    if(actx&&actx.state==="suspended"){ try{ await actx.resume(); }catch(e){} }
-    try{ await au.play(); disarm(); }catch(e){ armPlay(); }
-  } else au.pause();
+  if(cur.paused){
+    await wireAudio();            // inside the gesture, where Safari allows it
+    try{ await cur.play(); disarm(); }catch(e){ armPlay(); }
+  } else cur.pause();
 };
-au.onplay=()=>{$("#play").textContent="❚❚"; $("#play").setAttribute("aria-label","Pause");};
-au.onpause=()=>{$("#play").textContent="▶"; $("#play").setAttribute("aria-label","Play");};
-au.ontimeupdate=()=>{ if(!au.duration)return;
-  $("#fill").style.width=(au.currentTime/au.duration*100)+"%";
-  $("#t-el").textContent=fmtTime(au.currentTime);
-  $("#t-re").textContent="−"+fmtTime(au.duration-au.currentTime); };
-$("#bar").onclick=e=>{ if(au.duration){const r=e.currentTarget.getBoundingClientRect();
-  au.currentTime=(e.clientX-r.left)/r.width*au.duration;} };
+
+function paintTimes(){
+  if(!cur.duration||!isFinite(cur.duration)) return;
+  $("#fill").style.width=(cur.currentTime/cur.duration*100)+"%";
+  $("#t-el").textContent=fmtTime(cur.currentTime);
+  $("#t-re").textContent="−"+fmtTime(cur.duration-cur.currentTime);
+}
+[auA,auB].forEach(el=>{
+  el.addEventListener("play",()=>{ if(el===cur){ $("#play").textContent="❚❚";
+    $("#play").setAttribute("aria-label","Pause"); } });
+  el.addEventListener("pause",()=>{ if(el===cur && !swapping){ $("#play").textContent="▶";
+    $("#play").setAttribute("aria-label","Play"); } });
+  el.addEventListener("timeupdate",()=>{ if(el===cur) paintTimes(); });
+});
+$("#bar").onclick=e=>{ if(cur.duration){ const r=e.currentTarget.getBoundingClientRect();
+  cur.currentTime=(e.clientX-r.left)/r.width*cur.duration; } };
 document.addEventListener("keydown",e=>{
   if(e.code==="Space"&&e.target.tagName!=="INPUT"){ e.preventDefault(); $("#play").click(); }});
+paintModes(); paintDownloads();
 
 /* ---------- session restore ----------
    Resolving asks whether a render already exists; it never starts one, so
-   reloading the page can not kick off a four-minute job by itself. */
+   reloading the page can not kick off a long job by itself. 'Off' needs no
+   render at all, so it always restores. */
 async function boot(){
   await load();
-  let s=null;
-  try{ s=JSON.parse(localStorage.getItem(SESSION)||"null"); }catch(e){}
-  if(!s||!s.path) return;
+  let sess=null;
+  try{ sess=JSON.parse(localStorage.getItem(SESSION)||"null"); }catch(e){}
+  if(!sess||!sess.path) { paintModes(); return; }
+  if(sess.mode && MODES.some(m=>m.id===sess.mode)) mode=sess.mode;
+  paintModes();
+  curPath=sess.path; curName=sess.name||""; curDir=sess.dir||"";
+  $("#np-t").textContent=curName; $("#np-s").textContent=curDir;
+  const row=rows.get(sess.path); if(row) row.classList.add("active");
+
+  if(mode==="off"){
+    meta=Object.assign({},META_DEFAULTS); paintLegend(); paintDownloads();
+    cur.setAttribute("src","/api/source?path="+encodeURIComponent(curPath)); cur.load();
+    $("#play").disabled=false; armPlay(); return;
+  }
   let r;
-  try{ r=await post("/api/resolve",{path:s.path,preset}); }catch(e){ return; }
-  if(!r||!r.cached) return;
-  curPath=s.path; curName=s.name||""; curDir=s.dir||"";
-  $("#np-t").textContent=s.name||""; $("#np-s").textContent=s.dir||"";
-  const d=rows.get(s.path); if(d) d.classList.add("active");
-  curKey=r.key; meta=Object.assign({},META_DEFAULTS,r.meta||{}); paintLegend();
-  markRow(curPath,"ready");
-  const a=$("#au"); a.src="/api/audio/"+r.key; a.load();
+  try{ r=await post("/api/resolve",{path:curPath,preset:modeOf(mode).preset}); }
+  catch(e){ return; }
+  if(!r||!r.cached) return;                 // do not start work on a page load
+  curKey=r.key; meta=Object.assign({},META_DEFAULTS,r.meta||{});
+  markRow(curPath,"ready"); paintLegend(); paintDownloads();
+  cur.setAttribute("src","/api/audio/"+r.key); cur.load();
   $("#play").disabled=false;
-  $("#dl").href="/api/download/"+r.key+"?fmt=flac"; $("#dl").classList.add("on");
-  $("#dlm").href="/api/download/"+r.key+"?fmt=m4a"; $("#dlm").classList.add("on");
   fetch("/api/env/"+r.key).then(x=>x.ok?x.json():null).then(x=>{envData=x;}).catch(()=>{});
-  armPlay();                      // restored, not autoplayed: the user decides
+  armPlay();                                // restored, not autoplayed
 }
 
 /* ---------- 3D room ---------- */
@@ -604,7 +754,7 @@ const SRC=[
   {k:"bass",   col:0x6B4BFF, g:orb(0x6B4BFF,.46,.13), base:new THREE.Vector3(0,-1.5,-.4),  moves:false},
   {k:"drums",  col:0xFF9F45, g:orb(0xFF9F45,.30,.13), base:new THREE.Vector3(-1.9,-.2,-1.6), moves:false},
   {k:"vocals", col:0xFFEBC2, g:orb(0xFFEBC2,.26,.13), base:new THREE.Vector3(.2,.5,-2.2),  moves:false},
-  {k:"other",  col:0x2FE3D0, g:orb(0x2FE3D0,.34,.22), base:new THREE.Vector3(0,0,0),       moves:true}
+  {k:"other",  col:0x2FE3D0, g:orb(0x2FE3D0,.34,.22), base:new THREE.Vector3(0,0,-1.1),    moves:true}
 ];
 SRC.forEach(s=>s.pos=s.base.clone());
 
@@ -755,13 +905,16 @@ function stemLevel(k,t){
   return level(...BAND[k]);
 }
 function tick(){
-  const t=$("#au").currentTime||0;
+  const t=cur.currentTime||0;
+  // Nothing is being steered in Off, so nothing moves. Showing motion over an
+  // unprocessed file would be the picture lying about the audio.
+  const steered=(mode!=="off");
   const wallHit=new Array(WALLS.length).fill(0);
 
   SRC.forEach((s,si)=>{
-    if(s.moves) s.pos.copy(posAt(t));
-    else if(s.k==="vocals" && meta.vocal_path) s.pos.copy(stagePosAt(t));
-    else s.pos.set(s.base.x + driftX(s.k,t), s.base.y, s.base.z);
+    if(s.moves && steered) s.pos.copy(posAt(t));
+    else if(s.k==="vocals" && meta.vocal_path && steered) s.pos.copy(stagePosAt(t));
+    else s.pos.set(s.base.x + (steered?driftX(s.k,t):0), s.base.y, s.base.z);
     s.g.position.copy(s.pos);
     const target=stemLevel(s.k,t);
     s.lv = (s.lv===undefined) ? target : s.lv*0.72 + target*0.28;
@@ -796,7 +949,7 @@ function tick(){
   wallMeshes.forEach((m,i)=>{ m.material.opacity=.02+wallHit[i]*.20; });
 
   const mv=SRC[3].pos, arr=trailGeo.attributes.position.array;
-  for(let i=0;i<TN;i++){ const p=posAt(Math.max(0,t-(TN-1-i)*.22));
+  for(let i=0;i<TN;i++){ const p=steered?posAt(Math.max(0,t-(TN-1-i)*.22)):mv;
     arr[i*3]=p.x; arr[i*3+1]=p.y; arr[i*3+2]=p.z; }
   trailGeo.attributes.position.needsUpdate=true;
   shadow.position.set(mv.x,-RH+.02,mv.z);
@@ -809,12 +962,14 @@ function tick(){
   ren.render(scene,cam); requestAnimationFrame(tick);
 }
 function paintLegend(){
-  const walking=!!meta.vocal_path;
-  $("#legend").innerHTML=[["#6B4BFF","bass — fixed"],["#FF9F45","drums — drifts"],
-    ["#FFEBC2", walking?"vocals — walking the stage":"vocals — drifts"],
-    ["#2FE3D0","other — wandering"]]
+  const off=(mode==="off"), walking=!!meta.vocal_path;
+  $("#legend").innerHTML=[["#6B4BFF", off?"bass":"bass — fixed"],
+    ["#FF9F45", off?"drums":"drums — drifts"],
+    ["#FFEBC2", off?"vocals":(walking?"vocals — walking the stage":"vocals — drifts")],
+    ["#2FE3D0", off?"other":"other — wandering"]]
     .map(([c,l])=>'<div><i style="background:'+c+'"></i>'+l+'</div>').join("")
-    +'<div style="opacity:.55">drag to spin · scroll to zoom</div>';
+    +'<div style="opacity:.55">'+(off?"your original file — nothing is being steered"
+                                    :"drag to spin · scroll to zoom")+'</div>';
 }
 paintLegend();
 resize(); tick(); boot();

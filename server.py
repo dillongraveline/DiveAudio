@@ -39,8 +39,9 @@ def render_budget_bytes():
     return int(float(_cfg().get("max_render_gb", DEFAULT_RENDER_BUDGET_GB)) * (1 << 30))
 
 _index = []
+_index_paths = set()
 def reindex():
-    global _index
+    global _index, _index_paths
     out, seen = [], set()
     for d in music_dirs():
         if not d.exists(): continue
@@ -57,6 +58,11 @@ def reindex():
                 pass
     out.sort(key=lambda t: t["name"].lower())
     _index = out
+    # Resolved paths of everything in the library. /api/source will serve a file
+    # only if it is in here: the server binds 0.0.0.0 with no authentication, so
+    # an endpoint that takes a path must never be able to read outside the
+    # configured music directories.
+    _index_paths = {str(Path(t["path"]).resolve()) for t in out}
     return len(out)
 
 # Jobs are keyed by render key, not by a random id, so a second click on the
@@ -195,6 +201,30 @@ async def upload(file: UploadFile = File(...)):
             f.write(chunk); size += len(chunk)
     reindex()
     return {"path": str(dest), "name": dest.stem, "dir": "uploads", "bytes": size}
+
+
+SOURCE_TYPES = {".flac": "audio/flac", ".wav": "audio/wav", ".aif": "audio/aiff",
+                ".aiff": "audio/aiff", ".m4a": "audio/mp4", ".mp3": "audio/mpeg"}
+
+
+@app.get("/api/source")
+def source(path: str):
+    """Serve an untouched library file, for the 'Off' mode A/B.
+
+    Only files already in the index are served. Anything else -- a traversal, a
+    symlink out of the library, a path that simply is not music -- is refused
+    rather than read.
+    """
+    if not _index:
+        reindex()
+    try:
+        p = Path(path).resolve(strict=True)
+    except OSError:
+        return JSONResponse({"error": "file not found"}, status_code=404)
+    if str(p) not in _index_paths:
+        return JSONResponse({"error": "not in the library"}, status_code=403)
+    return FileResponse(p, media_type=SOURCE_TYPES.get(p.suffix.lower(),
+                                                       "application/octet-stream"))
 
 
 @app.post("/api/resolve")
