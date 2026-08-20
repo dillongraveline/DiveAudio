@@ -61,32 +61,52 @@ border-radius:7px;cursor:pointer}
 
 /* ---------- mobile ---------- */
 @media (max-width: 780px){
-  body{-webkit-text-size-adjust:100%}
-  header{height:48px;padding:0 14px}
-  .eng{font-size:9.5px;max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  main{flex-direction:column}
-  section{order:1;flex:1 1 auto;min-height:46vh}
-  aside{order:2;width:100%;flex:0 0 auto;max-height:40vh;border-right:0;border-top:1px solid var(--border)}
-  #view{min-height:44vh}
-  #legend{left:12px;bottom:10px;font-size:9.5px;line-height:1.7}
-  .searchwrap{padding:10px 12px}
-  #q{height:42px;font-size:16px}
-  .up{height:40px;line-height:38px}
-  .row{padding:12px 11px}
-  .row .t{font-size:14px}
-  footer{height:auto;flex-wrap:wrap;gap:10px 12px;padding:10px 12px 14px}
-  #play{width:48px;height:48px;font-size:17px}
-  .np{width:auto;flex:1 1 40%;min-width:0}
-  .scrub{flex:1 1 100%;order:5}
+  html,body{height:100vh;height:100dvh;overscroll-behavior:none}
+  header{height:46px;padding:0 12px;flex:0 0 auto}
+  .brand{font-size:13px}
+  .eng{font-size:9px;max-width:46%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* single column; every flex child gets min-height:0 so nothing can overflow
+     its parent and collide with the next element */
+  main{flex-direction:column;min-height:0}
+  section{order:1;flex:1 1 auto;min-height:0}
+  #view{flex:1 1 auto;min-height:160px}
+  aside{order:2;width:100%;flex:0 0 auto;max-height:34vh;min-height:0;
+        border-right:0;border-top:1px solid var(--border)}
+  #list{min-height:0;-webkit-overflow-scrolling:touch}
+
+  .searchwrap{padding:9px 12px 4px}
+  #q{height:40px;font-size:16px}          /* 16px stops iOS zooming on focus */
+  .up{height:38px;line-height:36px;margin-top:8px}
+  .scope{padding:0 12px 6px}
+  .row{padding:11px}
+  .row .t{font-size:13.5px}
+
+  /* legend pinned to the top of the scene, away from the orbit, with a
+     backdrop so it never sits illegibly on top of an orb */
+  #legend{top:0;left:0;right:0;bottom:auto;display:flex;flex-wrap:wrap;
+          gap:2px 12px;padding:7px 12px 9px;font-size:9px;line-height:1.5;
+          background:linear-gradient(180deg,rgba(8,9,16,.92),rgba(8,9,16,0))}
+  #legend div{white-space:nowrap}
+  #legend i{width:6px;height:6px;margin-right:5px}
+
+  footer{height:auto;flex:0 0 auto;flex-wrap:wrap;gap:8px 12px;padding:9px 12px 12px}
+  #play{order:1;width:44px;height:44px;font-size:16px}
+  .np{order:2;width:auto;flex:1 1 0;min-width:0}
+  .seg{order:3;flex:1 1 100%;justify-content:space-between}
+  .seg button{flex:1 1 0;padding:10px 6px;font-size:12px}
+  .scrub{order:4;flex:1 1 100%}
   .bar{height:6px}
   .times{margin-top:6px}
-  .seg{order:4;flex:1 1 auto;justify-content:space-between}
-  .seg button{flex:1 1 0;padding:10px 8px;font-size:12px}
 }
 @media (max-width: 780px) and (orientation: landscape){
   main{flex-direction:row}
-  aside{order:2;width:230px;max-height:none;border-top:0;border-left:1px solid var(--border)}
-  section{order:1}
+  aside{order:2;width:220px;max-height:none;border-top:0;border-left:1px solid var(--border)}
+  section{order:1;min-height:0}
+  #legend{position:absolute;top:auto;bottom:6px;background:none;padding:0 0 0 12px}
+  footer{flex-wrap:nowrap}
+  .seg{flex:0 0 auto}
+  .scrub{flex:1 1 auto;order:3}
 }
 </style></head><body>
 <header><div class="brand"><span class="dot"></span>DiveAudio</div>

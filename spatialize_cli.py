@@ -30,12 +30,32 @@ a = p.parse_args()
 if a.preset:
     a.beta, a.orbit = {'subtle': (0.60, 72.0), 'natural': (0.85, 50.0), 'wide': (1.0, 36.0)}[a.preset]
 
-info = sf.info(a.infile)
-SR = info.samplerate if info.samplerate in SOFA else 96000
-print(f"source : {info.samplerate} Hz {info.channels}ch {info.duration:.1f}s -> working at {SR} Hz")
+def load_audio(path):
+    """Decode anything we can. soundfile covers wav/flac/ogg/mp3; macOS
+    afconvert covers m4a/aac/alac without needing ffmpeg installed."""
+    try:
+        return sf.read(path, dtype='float64', always_2d=True)
+    except Exception as first:
+        conv = '/usr/bin/afconvert'
+        if not os.path.exists(conv):
+            raise RuntimeError("cannot decode %s (%s)" % (os.path.basename(path), first))
+        tmp = os.path.join(HERE, '_decode_%s.wav' % uuid.uuid4().hex[:8])
+        try:
+            subprocess.run([conv, '-f', 'WAVE', '-d', 'LEF32', path, tmp],
+                           check=True, capture_output=True)
+            return sf.read(tmp, dtype='float64', always_2d=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError("cannot decode %s: %s"
+                               % (os.path.basename(path), (e.stderr or b'').decode()[:200]))
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
 
-orig, sr0 = sf.read(a.infile, dtype='float64', always_2d=True)
+orig, sr0 = load_audio(a.infile)
 if orig.shape[1] == 1: orig = np.repeat(orig, 2, axis=1)
+SR = sr0 if sr0 in SOFA else 96000
+print("source : %d Hz %dch %.1fs -> working at %d Hz"
+      % (sr0, orig.shape[1], len(orig) / sr0, SR), flush=True)
 if sr0 != SR:
     g = gcd(SR, sr0); orig = resample_poly(orig, SR//g, sr0//g, axis=0)
 n = len(orig)
@@ -51,8 +71,7 @@ def _sha256(path):
 
 # Key the cache on the file's CONTENT, never its path or mtime, so two different
 # songs can never collide and a re-encoded file never reuses stale stems.
-_si = sf.info(a.infile)
-SRC_SHA, SRC_SECONDS = _sha256(a.infile), _si.frames / _si.samplerate
+SRC_SHA, SRC_SECONDS = _sha256(a.infile), n / SR
 key = SRC_SHA[:24] + '_' + a.model + '_s' + str(a.shifts)
 
 stems_root = os.path.join(HERE, 'stems')
@@ -93,9 +112,7 @@ with open(os.path.join(stems_root, key + '.lock'), 'w') as _lf:
             # demucs decodes via ffmpeg, which may be absent; soundfile handles
             # wav/flac/ogg/mp3 directly, so feed demucs a plain WAV instead.
             feed = os.path.join(tmp_dir, '_input.wav')
-            _d, _dsr = sf.read(a.infile, dtype='float32', always_2d=True)
-            sf.write(feed, _d, _dsr, subtype='FLOAT')
-            del _d
+            sf.write(feed, orig.astype('float32'), SR, subtype='FLOAT')
             subprocess.run([sys.executable, '-m', 'demucs', '-n', a.model, '-d', 'mps',
                             '--shifts', str(a.shifts), '-o', tmp_dir,
                             '--filename', '{stem}.wav', feed], check=True, cwd=HERE)
@@ -105,7 +122,7 @@ with open(os.path.join(stems_root, key + '.lock'), 'w') as _lf:
             for s in STEMS:
                 si = sf.info(os.path.join(tmp_dir, a.model, s + '.wav'))
                 if abs(si.frames / si.samplerate - SRC_SECONDS) > 0.25:
-                    raise RuntimeError('stem ' + s + ' duration does not match source')
+                    raise RuntimeError('stem %s is %.2fs, source is %.2fs' % (s, si.frames / si.samplerate, SRC_SECONDS))
             json.dump({'src_sha256': SRC_SHA, 'src_seconds': SRC_SECONDS,
                        'src_name': os.path.basename(a.infile),
                        'model': a.model, 'shifts': a.shifts, 'stems': list(STEMS)},
