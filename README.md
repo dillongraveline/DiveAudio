@@ -2,7 +2,7 @@
 
 # DiveAudio
 
-### High-fidelity binaural spatialisation for music — that shows you its own mechanism
+### High-fidelity binaural spatialisation for music — runs entirely on your machine
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-2FE3D0.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](https://python.org)
