@@ -134,6 +134,31 @@ with open(os.path.join(stems_root, key + '.lock'), 'w') as _lf:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             raise
 
+    # Per-stem RMS envelopes for the visualiser: computed once per cache entry,
+    # normalised against a shared peak so relative loudness between stems is
+    # preserved, then quantised to uint8 to keep the payload small.
+    env_path = os.path.join(cache_dir, 'envelopes.json')
+    if not os.path.exists(env_path):
+        ENV_HZ = 20
+        raw = {}
+        for _s in STEMS:
+            _d, _sr = sf.read(os.path.join(cache_dir, a.model, _s + '.wav'),
+                              dtype='float32', always_2d=True)
+            _m = _d.mean(axis=1)
+            _hop = max(1, int(round(_sr / ENV_HZ)))
+            _nf = int(np.ceil(len(_m) / _hop))
+            if _nf * _hop > len(_m):
+                _m = np.pad(_m, (0, _nf * _hop - len(_m)))
+            raw[_s] = np.sqrt((_m.reshape(_nf, _hop) ** 2).mean(axis=1))
+            del _d, _m
+        _peak = max(float(v.max()) for v in raw.values()) or 1.0
+        env = {k: np.clip(v / _peak * 255.0, 0, 255).astype(np.uint8).tolist()
+               for k, v in raw.items()}
+        _tmp = env_path + '.tmp'
+        with open(_tmp, 'w') as _fh:
+            json.dump({'rate': ENV_HZ, 'peak': _peak, 'stems': env}, _fh)
+        os.replace(_tmp, env_path)
+
 other, sro = sf.read(stem_wav, dtype='float64', always_2d=True)
 if sro != SR:
     g = gcd(SR, sro); other = resample_poly(other, SR//g, sro//g, axis=0)
@@ -222,7 +247,7 @@ def iacc(x):
     L,R = x[:,0]-x[:,0].mean(), x[:,1]-x[:,1].mean()
     return float(np.dot(L,R)/(np.linalg.norm(L)*np.linalg.norm(R)))
 lp = butter(4, a.xover, 'low', fs=SR, output='sos')
-print(json.dumps({"output": outp, "sr": SR, "drift": drift_info, "orbit": a.orbit, "elev": a.elev, "ramp": a.ramp, "beta": a.beta, "xover": a.xover, "duration": n/SR,
+print(json.dumps({"output": outp, "sr": SR, "drift": drift_info, "env_file": env_path, "orbit": a.orbit, "elev": a.elev, "ramp": a.ramp, "beta": a.beta, "xover": a.xover, "duration": n/SR,
   "iacc_orig": round(iacc(orig),3), "iacc_out": round(iacc(mix),3),
   "bass_iacc_orig": round(iacc(sosfiltfilt(lp,orig,axis=0)),3),
   "bass_iacc_out":  round(iacc(sosfiltfilt(lp,mix,axis=0)),3),

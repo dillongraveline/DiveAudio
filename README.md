@@ -2,38 +2,44 @@
 
 # DiveAudio
 
-**High-fidelity binaural spatialisation for music — that shows you its own mechanism.**
+### High-fidelity binaural spatialisation for music — that shows you its own mechanism
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-2FE3D0.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](https://python.org)
-[![HRTF](https://img.shields.io/badge/HRTF-SADIE%20II%20KU100-2FE3D0)](https://www.york.ac.uk/sadie-project/database.html)
-[![Separation](https://img.shields.io/badge/separation-Demucs-6B4BFF)](https://github.com/adefossez/demucs)
-[![Runs](https://img.shields.io/badge/runs-locally%20%C2%B7%20LAN-FF9F45)](#quickstart)
+[![HRTF](https://img.shields.io/badge/HRTF-SADIE%20II%20KU100-6B4BFF)](https://www.york.ac.uk/sadie-project/database.html)
+[![Separation](https://img.shields.io/badge/separation-Demucs-FF9F45)](https://github.com/adefossez/demucs)
+[![Runs](https://img.shields.io/badge/runs-locally%20%C2%B7%20no%20cloud-1E2B44)](#quickstart)
+
+<img src="docs/room.svg" width="100%" alt="The virtual room: four sources, expanding wavefronts, one moving element">
 
 </div>
 
 ---
 
-## What this is
+## Why this exists
 
-Most "8D audio" takes a finished stereo mix, swings the *whole thing* around your
-head on an LFO, and buries it in reverb. It sounds impressive for thirty seconds
-and fatiguing after two minutes, because your ears know that a drum kit does not
-orbit the listener.
+Most "8D audio" takes a finished stereo mix, swings the **whole thing** around your
+head on an LFO, and drowns it in reverb. It's striking for thirty seconds and
+exhausting after two minutes — because your ears know a drum kit does not orbit
+the listener.
 
-DiveAudio moves almost nothing. The rhythm section stays welded in place while a
-single directional layer drifts around it — and the 3D view shows you exactly
-which is which, in real time, driven by the same maths that rendered the audio.
+DiveAudio moves almost nothing. The rhythm section stays welded in place, one
+textural layer wanders, and vocals drift so slowly they take half a song to cross
+a small arc. The 3D view shows you exactly which is which, live, driven by the
+same maths that rendered the audio.
 
 ## The core idea
 
-Demucs separates the track into stems, but the stems are **never re-summed** to
-make the output. Re-summing bakes every separation artifact into everything you
+Demucs separates the track into stems — but the stems are **never re-summed** to
+produce output. Re-summing bakes every separation artifact into everything you
 hear. Instead the signal is split in two:
 
 ```
 mover_dry = beta · mid( highpass( texture_stem ) )    # the only thing that moves
 anchor    = original_master − mover_dry               # literally everything else
 ```
+
+<img src="docs/signal-flow.svg" width="100%" alt="Signal flow: the anchor is the original minus one mono component">
 
 `anchor` is your original file minus one mono component. Drums, bass, vocals, the
 diffuse reverb field and the full bandwidth survive **untouched** — never
@@ -42,18 +48,16 @@ HRTF-filtered, never reconstructed by a model, never band-limited to Demucs'
 anchor, masked by the very signal it was subtracted from.
 
 Only the **directional** (mid) component of the texture layer is convolved with
-SADIE II KU100 HRTFs and orbited. The **diffuse** (side) component is left
-entirely alone.
+SADIE II KU100 HRTFs. The **diffuse** (side) component is left entirely alone.
 
-> That last decision is the whole trick, and it was learned the hard way. Two
-> earlier designs rendered the full texture layer and came out measurably
-> **narrower** than the source — because HRTF point-rendering an already-diffuse
-> signal makes it *more* correlated, not less. Steer what is directional;
-> preserve what is diffuse.
+> **This is the whole trick, and it was learned the hard way.** Two earlier
+> designs rendered the full texture layer and came out measurably *narrower* than
+> the source — because HRTF point-rendering an already-diffuse signal makes it
+> **more** correlated, not less. Steer what is directional; preserve what is diffuse.
 
 ## Measured
 
-96 kHz / 24-bit reference track, `natural` preset:
+96 kHz / 24-bit reference track, default preset:
 
 | metric | source | output | |
 |---|---:|---:|---|
@@ -76,51 +80,47 @@ cd DiveAudio
 ```
 
 Open `http://localhost:8765`, or your machine's LAN IP from a phone or tablet.
-Point it at your music by editing `config.json`, or just drag files onto the
-sidebar.
+Point it at your music by editing `config.json`, or drag files onto the sidebar.
 
-## How it fits together
+Everything runs on your machine. No account, no upload, no cloud.
 
-```
- browser  ┌───────────────────────────────────────────┐
-          │  three.js scene   ◀── same az(t)/el(t) ──┐ │
-          │  <audio> playback                        │ │
-          └──────────────┬───────────────────────────┼─┘
-                         │ HTTP                      │
-          ┌──────────────▼───────────────────────────┼─┐
- server   │  FastAPI · single-flight render lock     │ │
-          │  content-addressed stem cache            │ │
-          └──────────────┬───────────────────────────┼─┘
-                         │                           │
-          ┌──────────────▼───────────────────────────┴─┐
- render   │  Demucs ─▶ mid/side split ─▶ HRTF convolve │
-          └────────────────────────────────────────────┘
-```
+## How motion works
 
-The orb you see **is** the position the audio is rendered at — not an animation
-approximating it. Azimuth runs on a 50 s period and elevation on 37 s; because
-those are non-commensurate, the path never closes and never repeats.
+Nothing follows a circle. The wandering source uses **sums of sines with
+pairwise-incommensurate periods** (97 / 61 / 37 s in azimuth, 71 / 43 s in
+elevation), so the path never repeats — yet it stays a pure function of time,
+which means the renderer and the browser compute the identical trajectory
+independently. RMS angular speed is ~7.8 °/s.
 
-### Colour is meaning, not decoration
+The anchored sources drift too, but by **constant-power amplitude panning, never
+HRTF** — level only, so their timbre is untouched. Depth is low and the period is
+tied to track length, so a source takes roughly half the song to traverse its
+range.
+
+**Bass never moves.** Low-frequency panning is inaudible and only muddies the
+centre.
 
 | | stem | behaviour |
 |---|---|---|
-| 🟣 | bass | large, low, centre — **never moves** |
-| 🟠 | drums | front-centre, pulses on transients — stationary |
-| ⚪ | vocals | dead centre — perfectly still |
-| 🟢 | other | **the only orbiting object**, trails behind itself |
+| 🟣 | bass | fixed, dead centre |
+| 🟠 | drums | drifts by amplitude pan, very slowly |
+| ⚪ | vocals | drifts by amplitude pan, very slowly |
+| 🟢 | other | wanders freely, HRTF-rendered |
+
+Orb size is driven by **real per-stem RMS envelopes** computed at separation time,
+not by frequency bands of the mix — so each orb pulses with its own instrument.
 
 ## CLI
 
 ```bash
-./.venv/bin/python spatialize_cli.py track.flac --preset natural
+./.venv/bin/python spatialize_cli.py track.flac
 ```
 
 | flag | default | meaning |
 |---|---|---|
-| `--preset` | — | `subtle` · `natural` · `wide` |
-| `--beta` | 0.85 | fraction of the texture layer that moves |
-| `--orbit` | 50 | seconds per revolution |
+| `--preset` | — | `subtle` · `natural` · `default` · `wide` |
+| `--beta` | 0.92 | fraction of the texture layer that moves |
+| `--orbit` | 43 | motion time-base, seconds |
 | `--xover` | 200 | Hz below which nothing moves |
 | `--stem` | other | which layer becomes the mover |
 | `--model` | htdemucs | `htdemucs_ft` is better and ~4× slower |
@@ -128,29 +128,44 @@ those are non-commensurate, the path never closes and never repeats.
 
 ## Cache correctness
 
-Stems are cached per input file, and the cache is built to make a stem from one
-song appearing in another's mix **structurally impossible**:
+Stems cache per input file, built so that a stem from one song appearing in
+another's mix is **structurally impossible**:
 
 - keys are a **SHA-256 of file content**, never path or mtime
 - separation runs in a temp dir and is **atomically renamed** into place, so a
   killed job never leaves a half-written entry to be read later
 - every entry carries a **manifest** (source hash, duration, filename); a cache
-  hit requires it to match *this* file and all four stems to match its duration
+  hit requires it to match *this* file, with all four stems matching its duration
 - a **length mismatch at point of use raises** rather than padding silently
 - an `flock` per key serialises concurrent runs on the same file
+
+First separation takes minutes; every render after it takes seconds.
+
+## Formats
+
+Decoding uses libsndfile, falling back to macOS `afconvert` — so WAV, FLAC, OGG,
+MP3, M4A, AAC and ALAC all work with **no ffmpeg required**.
+
+> MP3 container headers routinely overstate duration (encoder delay and padding —
+> one test file claimed 346.9 s and decoded to 340.8 s). All duration checks use
+> the decoded audio, never the header.
+
+Output downloads as lossless FLAC, or AAC in M4A at roughly 1/6 the size.
 
 ## Known limitations
 
 - **No authentication.** Binding `0.0.0.0` exposes your library to the LAN.
-- **`.m4a` / AAC unsupported** — libsndfile has no AAC decoder.
-- **FLAC output is large** (~90 MB for 4 min at 96/24), which is rough over wifi
-  to a phone. A compressed preview stream is the obvious next step.
-- Orbit period and elevation are fixed, not yet derived from tempo.
+- **FLAC output is large** (~90 MB for 4 min at 96/24). Use the M4A download for phones.
+- Motion parameters are not yet derived from tempo.
 - Binaural output is **for headphones**; it partially collapses on speakers.
+- `afconvert` decoding is macOS-only; other platforms are limited to what
+  libsndfile handles.
 
 ## Credits
 
 [SADIE II binaural database](https://www.york.ac.uk/sadie-project/database.html)
 (Apache-2.0) — Neumann KU100 dummy head, 8802 measurements at 96 kHz.
-Source separation by [Demucs](https://github.com/adefossez/demucs).
-Rendering with [three.js](https://threejs.org).
+Separation by [Demucs](https://github.com/adefossez/demucs) (MIT).
+Rendering with [three.js](https://threejs.org) (MIT).
+
+Licensed under the [MIT License](LICENSE).

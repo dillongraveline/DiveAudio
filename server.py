@@ -141,13 +141,35 @@ def audio(jid: str):
         return JSONResponse({"error": "not ready"}, status_code=409)
     return FileResponse(j["file"], media_type="audio/flac")
 
+@app.get("/api/env/{jid}")
+def envelopes(jid: str):
+    j = jobs.get(jid) or {}
+    f = (j.get("meta") or {}).get("env_file")
+    if j.get("stage") != "done" or not f or not Path(f).exists():
+        return JSONResponse({"error": "unavailable"}, status_code=404)
+    return FileResponse(f, media_type="application/json")
+
 @app.get("/api/download/{jid}")
-def download(jid: str):
+def download(jid: str, fmt: str = "flac"):
     j = jobs.get(jid) or {}
     if j.get("stage") != "done":
         return JSONResponse({"error": "not ready"}, status_code=409)
-    name = Path(j.get("path", "track")).stem + " (binaural).flac"
-    return FileResponse(j["file"], media_type="audio/flac", filename=name)
+    base = Path(j.get("path", "track")).stem
+    if fmt == "m4a":
+        conv = "/usr/bin/afconvert"
+        if not os.path.exists(conv):
+            return JSONResponse({"error": "afconvert unavailable"}, status_code=503)
+        dst = str(Path(j["file"]).with_suffix(".m4a"))
+        if not Path(dst).exists():
+            r = subprocess.run([conv, "-f", "m4af", "-d", "aac", "-b", "256000",
+                                j["file"], dst], capture_output=True)
+            if r.returncode != 0:
+                return JSONResponse({"error": (r.stderr or b"").decode()[:300]},
+                                    status_code=500)
+        return FileResponse(dst, media_type="audio/mp4",
+                            filename=base + " (binaural).m4a")
+    return FileResponse(j["file"], media_type="audio/flac",
+                        filename=base + " (binaural).flac")
 
 @app.get("/")
 def root():

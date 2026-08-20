@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 360" width="980" height="360" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Inter,sans-serif">
+  <rect width="980" height="360" rx="14" fill="#0B0D14"/>
+  <text x="32" y="42" fill="#E9EBF2" font-size="17" font-weight="600">Signal flow — nothing is rebuilt from stems</text>
+  <text x="32" y="64" fill="#6E7689" font-size="12.5">The anchor is your original file minus one mono component. Separation error stays buried inside it.</text>
+
+  <rect x="32" y="96" width="176" height="62" rx="9" fill="#141826" stroke="#2B3A5E"/>
+  <text x="120" y="122" fill="#E9EBF2" font-size="13" font-weight="600" text-anchor="middle">original master</text>
+  <text x="120" y="141" fill="#6E7689" font-size="11" text-anchor="middle">full bandwidth, untouched</text>
+
+  <path d="M208 127 H262" stroke="#2B3A5E" stroke-width="1.5" fill="none" marker-end="url(#a)"/>
+  <rect x="262" y="96" width="150" height="62" rx="9" fill="#141826" stroke="#2B3A5E"/>
+  <text x="337" y="122" fill="#E9EBF2" font-size="13" text-anchor="middle">texture stem</text>
+  <text x="337" y="141" fill="#6E7689" font-size="11" text-anchor="middle">Demucs · "other"</text>
+
+  <path d="M412 127 H466" stroke="#2B3A5E" stroke-width="1.5" fill="none" marker-end="url(#a)"/>
+  <rect x="466" y="86" width="164" height="82" rx="9" fill="#141826" stroke="#2FE3D0" stroke-opacity=".55"/>
+  <text x="548" y="110" fill="#2FE3D0" font-size="12.5" font-weight="600" text-anchor="middle">directional only</text>
+  <text x="548" y="130" fill="#9AA3B5" font-size="11" text-anchor="middle">highpass 200 Hz</text>
+  <text x="548" y="148" fill="#9AA3B5" font-size="11" text-anchor="middle">mid = (L+R)/2 · × β</text>
+
+  <path d="M630 127 H690" stroke="#2FE3D0" stroke-width="1.5" fill="none" marker-end="url(#c)"/>
+  <rect x="690" y="96" width="150" height="62" rx="9" fill="#10202A" stroke="#2FE3D0" stroke-opacity=".55"/>
+  <text x="765" y="122" fill="#2FE3D0" font-size="13" font-weight="600" text-anchor="middle">HRTF convolve</text>
+  <text x="765" y="141" fill="#6E7689" font-size="11" text-anchor="middle">SADIE II · KU100</text>
+
+  <path d="M120 158 V246 H262" stroke="#6B4BFF" stroke-width="1.5" fill="none" marker-end="url(#b)"/>
+  <text x="150" y="200" fill="#6B4BFF" font-size="11.5">original</text>
+  <path d="M548 168 V212 H300 V232" stroke="#2FE3D0" stroke-width="1.5" stroke-dasharray="4 3" fill="none" marker-end="url(#c)"/>
+  <text x="360" y="205" fill="#2FE3D0" font-size="11.5">− the moved component</text>
+
+  <rect x="262" y="232" width="176" height="62" rx="9" fill="#161230" stroke="#6B4BFF" stroke-opacity=".6"/>
+  <text x="350" y="258" fill="#A996FF" font-size="13" font-weight="600" text-anchor="middle">anchor</text>
+  <text x="350" y="277" fill="#6E7689" font-size="11" text-anchor="middle">drums · bass · vocals · diffuse</text>
+
+  <path d="M438 263 H690" stroke="#6B4BFF" stroke-width="1.5" fill="none" marker-end="url(#b)"/>
+  <path d="M765 158 V240 H772" stroke="#2FE3D0" stroke-width="1.5" fill="none"/>
+  <rect x="690" y="232" width="150" height="62" rx="9" fill="#141826" stroke="#2B3A5E"/>
+  <text x="765" y="258" fill="#E9EBF2" font-size="13" font-weight="600" text-anchor="middle">binaural output</text>
+  <text x="765" y="277" fill="#6E7689" font-size="11" text-anchor="middle">anchor + moved layer</text>
+
+  <text x="875" y="122" fill="#6E7689" font-size="11">never</text>
+  <text x="875" y="138" fill="#6E7689" font-size="11">re-summed</text>
+  <defs>
+    <marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8Z" fill="#2B3A5E"/></marker>
+    <marker id="b" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8Z" fill="#6B4BFF"/></marker>
+    <marker id="c" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8Z" fill="#2FE3D0"/></marker>
+  </defs>
+</svg>

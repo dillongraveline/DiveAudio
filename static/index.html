@@ -135,7 +135,8 @@ border-radius:7px;cursor:pointer}
   <footer>
     <button id="play" disabled>▶</button>
     <div class="np"><div class="t" id="np-t">Nothing loaded</div><div class="s" id="np-s">Pick a track</div></div>
-    <a class="dl" id="dl" href="#" download>&#8595;&nbsp; Download FLAC</a>
+    <a class="dl" id="dl" href="#" download>&#8595;&nbsp; FLAC</a>
+    <a class="dl" id="dlm" href="#" download>&#8595;&nbsp; M4A</a>
     <div class="scrub"><div class="bar" id="bar"><div class="fill" id="fill"></div></div>
       <div class="times"><span id="t-el">0:00</span><span id="t-re">0:00</span></div></div>
   </footer>
@@ -196,7 +197,7 @@ async function pick(t,el){
 
 async function render(){
   const au=$("#au"); au.pause(); $("#play").disabled=true;
-  $("#dl").classList.remove("on");
+  $("#dl").classList.remove("on"); $("#dlm").classList.remove("on"); envData=null;
   showStatus("SEPARATING STEMS",$("#np-t").textContent,
     "First time on a track this runs Demucs — about 4 minutes. After that it's cached and renders take ~20 seconds.");
   const r=await (await fetch("/api/render",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -212,7 +213,11 @@ function poll(){
     if(j.stage==="done"){ clearInterval(iv); pollTimer=null; meta=Object.assign(meta,j.meta||{});
       hideStatus(); const au=$("#au"); au.src="/api/audio/"+job; au.load();
       $("#play").disabled=false; au.play().catch(()=>{});
-      const dl=$("#dl"); dl.href="/api/download/"+job; dl.classList.add("on"); }
+      const dl=$("#dl"); dl.href="/api/download/"+job+"?fmt=flac"; dl.classList.add("on");
+      const dm=$("#dlm"); dm.href="/api/download/"+job+"?fmt=m4a"; dm.classList.add("on");
+      envData=null;
+      fetch("/api/env/"+job).then(r=>r.ok?r.json():null)
+        .then(d=>{envData=d;}).catch(()=>{envData=null;}); }
     else if(j.stage==="cancelled"){ clearInterval(iv); pollTimer=null; }
     else if(j.stage==="error"){ clearInterval(iv); pollTimer=null; showStatus("ERROR","Render failed",j.error||""); }
   },1500);
@@ -377,6 +382,16 @@ function level(lo,hi){
 }
 
 const BAND={bass:[0,.06], drums:[.06,.22], vocals:[.05,.3], other:[.22,.9]};
+let envData=null;
+/* true per-stem level from the server's RMS envelopes; falls back to
+   frequency bands of the mixed audio if they are not available */
+function stemLevel(k,t){
+  if(envData && envData.stems && envData.stems[k]){
+    const arr=envData.stems[k], i=Math.floor(t*envData.rate);
+    return (i>=0 && i<arr.length) ? arr[i]/255 : 0;
+  }
+  return level(...BAND[k]);
+}
 function tick(){
   const t=$("#au").currentTime||0;
   const wallHit=new Array(WALLS.length).fill(0);
@@ -385,8 +400,10 @@ function tick(){
     if(s.moves) s.pos.copy(posAt(t));
     else s.pos.set(s.base.x + driftX(s.k,t), s.base.y, s.base.z);
     s.g.position.copy(s.pos);
-    const lv=level(...BAND[s.k]);
-    s.g.scale.setScalar(.82+.5*lv);
+    const target=stemLevel(s.k,t);
+    s.lv = (s.lv===undefined) ? target : s.lv*0.72 + target*0.28;
+    const lv=s.lv;
+    s.g.scale.setScalar(.82+.6*lv);
 
     for(let i=0;i<FRONTS;i++){
       const ph=((t/WPER)+i/FRONTS+si*.17)%1;
